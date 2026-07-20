@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merged Sizer — Polymarket Copy Bot</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--panel-2:#21262d;--border:#30363d;--text:#e6edf3;--text-dim:#8b949e;--accent:#2dd4bf;--pos:#3fb950;--neg:#f85149;--flat:#8b949e;--wt:#2dd4bf;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:24px 20px 60px;}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;} h1{font-size:22px;margin:0;} .sub{color:var(--text-dim);font-size:13px;}
+  .nav{margin:8px 0 20px;} .nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--border);padding:5px 11px;border-radius:6px;} .nav a:hover{background:var(--panel-2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;color:var(--text-dim);font-size:12.5px;margin-bottom:20px;line-height:1.5;}
+  .verdict{font-size:13px;padding:12px 16px;border-radius:6px;background:var(--panel-2);margin-bottom:22px;line-height:1.55;}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;} .card.wt{border-top:3px solid var(--wt);} .card.flat{border-top:3px solid var(--flat);}
+  .card h3{margin:0 0 12px;font-size:13px;}
+  .metric{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;} .metric:last-child{border-bottom:none;} .metric .k{color:var(--text-dim);} .metric .v{font-variant-numeric:tabular-nums;font-weight:600;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:22px;overflow:hidden;} .panel h2{font-size:14px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);} .panel h2 small{color:var(--text-dim);font-weight:400;font-size:12px;}
+  .chartwrap{padding:16px;}
+  table{width:100%;border-collapse:collapse;} th,td{text-align:left;padding:9px 16px;font-size:13px;white-space:nowrap;} th{color:var(--text-dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);} td{border-bottom:1px solid var(--border);} tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;} .pos{color:var(--pos);} .neg{color:var(--neg);} .dim{color:var(--text-dim);}
+  .legend{display:flex;gap:18px;font-size:12px;padding:0 16px 12px;} .legend span{display:inline-flex;align-items:center;gap:6px;} .swatch{width:14px;height:3px;display:inline-block;border-radius:2px;}
+  .updated{color:var(--text-dim);font-size:11px;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>🔀 Merged Sizer</h1><span class="sub">Friend's Kelly engine + your conviction edge</span></header>
+  <div class="nav"><a href="/">← Main dashboard</a> &nbsp; <a href="/shadow">Shadow book →</a> &nbsp; <a href="/sizing">Sizing experiment →</a></div>
+
+  <div class="note">
+    <b>📖 In plain terms:</b> an experiment that tried to <b>combine our "conviction" edge with a friend's Kelly sizing
+    math.</b> Kelly is a formula that stakes more when your edge is bigger — but it only bets when your win rate clearly
+    beats the market price. <b>The result: it didn't work.</b> That rule rules out our <i>best</i> bets (confident favorites
+    at higher prices) and instead forces cheap bets that lose. We keep this page as an <b>honest record of what we tested
+    and why we set it aside.</b> No real bets.<br><br>
+    <b>Takeaway:</b> our edge is "expensive conviction" (many sharp leaders on a favorite), not "cheap value" — so the Kelly
+    formula fights it instead of helping. The winning idea lives on the <a href="/hybrid" style="color:var(--accent)">Hybrid</a> page.
+  </div>
+
+  <div class="verdict" id="verdict">Loading…</div>
+
+  <div class="cmp">
+    <div class="card wt">
+      <h3><span style="color:var(--wt)">●</span> Merged (conviction-Kelly)</h3>
+      <div class="metric"><span class="k">Total PnL</span><span class="v" id="m-pnl">—</span></div>
+      <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="m-roi">—</span></div>
+      <div class="metric"><span class="k">Max drawdown</span><span class="v" id="m-dd">—</span></div>
+      <div class="metric"><span class="k">Bets taken / skipped</span><span class="v dim" id="m-bets">—</span></div>
+    </div>
+    <div class="card flat">
+      <h3><span style="color:var(--flat)">●</span> Flat 1% baseline</h3>
+      <div class="metric"><span class="k">Total PnL</span><span class="v" id="mf-pnl">—</span></div>
+      <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="mf-roi">—</span></div>
+      <div class="metric"><span class="k">Max drawdown</span><span class="v" id="mf-dd">—</span></div>
+      <div class="metric"><span class="k">Bets taken</span><span class="v dim">all</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cumulative PnL <small>— merged vs flat</small></h2>
+    <div class="legend"><span><span class="swatch" style="background:var(--flat)"></span> Flat 1%</span><span><span class="swatch" style="background:var(--wt)"></span> Merged (conviction-Kelly)</span></div>
+    <div class="chartwrap"><svg id="chart" viewBox="0 0 900 300" width="100%" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </div>
+
+  <div class="panel">
+    <h2>By Conviction Tier <small>— which tiers the sizer actually bet, and how they did</small></h2>
+    <table>
+      <thead><tr><th>Tier</th><th class="num">Trades</th><th class="num">Bets taken</th><th class="num">Staked</th><th class="num">PnL</th></tr></thead>
+      <tbody id="t-tier"><tr><td colspan="5" class="dim" style="padding:24px;text-align:center">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+<script>
+function money(v){return (v>=0?'+$':'-$')+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});}
+function cls(v){return v>0?'pos':(v<0?'neg':'dim');}
+function drawChart(days,flat,mg){
+  const W=900,H=300,pad=44; const all=flat.concat(mg); const lo=Math.min(0,...all),hi=Math.max(0,...all);
+  const x=i=>pad+(W-pad*1.3)*(days.length<2?0.5:i/(days.length-1)); const y=v=>H-pad-(H-pad*1.6)*((v-lo)/((hi-lo)||1));
+  const path=a=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' '); const zy=y(0);
+  let s=`<line x1="${pad}" y1="${zy}" x2="${W-pad*0.3}" y2="${zy}" stroke="#30363d"/>`;
+  s+=`<text x="${pad-6}" y="${y(hi)+4}" fill="#8b949e" font-size="11" text-anchor="end">${money(hi)}</text>`;
+  s+=`<text x="${pad-6}" y="${zy+4}" fill="#8b949e" font-size="11" text-anchor="end">$0</text>`;
+  if(lo<0)s+=`<text x="${pad-6}" y="${y(lo)+4}" fill="#8b949e" font-size="11" text-anchor="end">${money(lo)}</text>`;
+  s+=`<path d="${path(flat)}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
+  s+=`<path d="${path(mg)}" fill="none" stroke="#2dd4bf" stroke-width="2.5"/>`;
+  document.getElementById('chart').innerHTML=s;
+}
+async function load(){
+  try{
+    const d=await(await fetch('/api/merged_sim')).json(); const m=d.merged,f=d.flat;
+    document.getElementById('m-pnl').innerHTML=`<span class="${cls(m.pnl)}">${money(m.pnl)}</span>`;
+    document.getElementById('m-roi').innerHTML=`<span class="${cls(m.roi_pct)}">${m.roi_pct}%</span>`;
+    document.getElementById('m-dd').innerHTML=`<span class="neg">-$${m.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    document.getElementById('m-bets').textContent=`${m.bets_taken} / ${m.bets_skipped}`;
+    document.getElementById('mf-pnl').innerHTML=`<span class="${cls(f.pnl)}">${money(f.pnl)}</span>`;
+    document.getElementById('mf-roi').innerHTML=`<span class="${cls(f.roi_pct)}">${f.roi_pct}%</span>`;
+    document.getElementById('mf-dd').innerHTML=`<span class="neg">-$${f.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    const win=m.roi_pct>f.roi_pct;
+    document.getElementById('verdict').innerHTML=
+      `On ${d.resolved} real trades, the merged sizer took <b>${m.bets_taken}</b> bets (skipped ${m.bets_skipped}) and returned `+
+      `<b class="${cls(m.pnl)}">${money(m.pnl)}</b> (<b>${m.roi_pct}%</b> ROI) vs flat 1% at <b>${f.roi_pct}%</b>. `+
+      (win?'The merge beat flat on risk-adjusted return.':'Even with conviction stratification, the Kelly edge floor rejects your high-price/high-conviction bets and admits marginal low-price ones — so it <span class="neg">still underperforms flat</span>. The conservative EV test demands more sample certainty than your win rates provide at the prices you pay.');
+    drawChart(d.curve.days,d.curve.flat,d.curve.merged);
+    document.getElementById('t-tier').innerHTML=d.by_tier.map(b=>
+      `<tr><td>${b.tier}</td><td class="num">${b.trades}</td><td class="num">${b.taken}</td><td class="num dim">$${b.staked.toLocaleString(undefined,{maximumFractionDigits:0})}</td><td class="num ${cls(b.pnl)}">${money(b.pnl)}</td></tr>`).join('');
+    document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+d.note;
+  }catch(e){document.getElementById('updated').textContent='Error: '+e;}
+}
+load(); setInterval(load,60000);
+</script>
+</body>
+</html>

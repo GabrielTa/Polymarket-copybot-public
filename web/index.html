@@ -1,0 +1,1745 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Polymarket Copy Bot</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root[data-theme="dark"] {
+  --bg: #0b0d10;
+  --panel: #141820;
+  --panel-2: #1b2029;
+  --border: #242a35;
+  --text: #e6e9ef;
+  --text-dim: #8b93a3;
+  --accent: #5eead4;
+  --accent-dim: #134e4a;
+  --pos: #4ade80;
+  --neg: #f87171;
+  --warn: #fbbf24;
+}
+:root[data-theme="light"] {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --panel-2: #f3f3f0;
+  --border: #e2e1dc;
+  --text: #1f2430;
+  --text-dim: #5f6778;
+  --accent: #0d9488;
+  --accent-dim: #ccfbf1;
+  --pos: #16a34a;
+  --neg: #dc2626;
+  --warn: #d97706;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 16px;
+  min-height: 100vh;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+h1 .dot { color: var(--accent); }
+h2 { font-size: 12px; font-weight: 600; text-transform: uppercase;
+     letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 10px; }
+
+.toggle {
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); padding: 6px 12px; border-radius: 6px;
+  cursor: pointer; font: inherit;
+}
+.toggle:hover { background: var(--panel-2); }
+.toggle.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; position: relative; }
+.kpi .label-wrap { display: flex; align-items: center; gap: 4px; }
+.kpi .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.kpi .help-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--panel-2);
+  color: var(--text-dim); font-size: 10px; font-weight: bold; cursor: help;
+  transition: all 0.2s;
+}
+.kpi .help-icon:hover { background: var(--accent); color: var(--bg); }
+.kpi .tooltip {
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 11px; color: var(--text-dim); line-height: 1.4;
+  white-space: nowrap; z-index: 100; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s; margin-bottom: 8px;
+}
+.kpi .help-icon:hover ~ .tooltip { opacity: 1; pointer-events: auto; }
+.kpi .value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* Table-header tooltip (for leaderboard columns) */
+.th-tip { display: inline-flex; align-items: center; gap: 3px; }
+.th-tip .tip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%; background: var(--panel-2);
+  color: var(--text-dim); font-size: 9px; font-weight: bold; cursor: help;
+  transition: all 0.2s; flex-shrink: 0;
+}
+.th-tip .tip-icon:hover { background: var(--accent); color: var(--bg); }
+/* Global floating tooltip — appended to <body>, never clipped by overflow */
+#global-tip {
+  position: fixed; z-index: 9999; pointer-events: none;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 11px; font-size: 11px; color: var(--text-dim); line-height: 1.5;
+  white-space: normal; max-width: 280px;
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  opacity: 0; transition: opacity 0.15s;
+}
+/* tip-box elements are now invisible data stores — the JS reads their innerHTML */
+.th-tip .tip-box { display: none; }
+/* Sort arrow on sortable headers */
+.sort-arrow { font-size: 10px; color: var(--accent); margin-left: 2px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 12px;
+}
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; min-width: 0; }
+.panel.full { grid-column: 1 / -1; }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+th { text-align: left; font-size: 10px; text-transform: uppercase;
+     letter-spacing: 0.08em; color: var(--text-dim); padding: 6px 8px;
+     border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+td.addr { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.wrap { white-space: normal; max-width: 200px; }
+td.market-col { white-space: normal; max-width: 150px; min-width: 100px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; }
+.score-bar { display: inline-block; width: 40px; height: 4px; background: var(--panel-2);
+             border-radius: 2px; margin-right: 6px; vertical-align: middle; position: relative; }
+.score-bar > span { position: absolute; left: 0; top: 0; height: 100%;
+                    background: var(--accent); border-radius: 2px; }
+.pos { color: var(--pos); } .neg { color: var(--neg); } .dim { color: var(--text-dim); } .warn { color: var(--warn); }
+
+.feed { max-height: 420px; overflow-y: auto; }
+.feed-row { display: grid; grid-template-columns: 58px 90px 1fr auto; gap: 8px;
+            padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 12px; align-items: start; }
+.feed-row.new { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: var(--accent-dim); } to { background: transparent; } }
+
+/* Feed filter tabs */
+.feed-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.feed-tab { padding: 3px 10px; font-size: 11px; border-radius: 4px;
+            background: var(--panel-2); color: var(--text-dim);
+            border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
+.feed-tab:hover { background: var(--border); color: var(--text); }
+.feed-tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.feed-tab.active.tab-skip  { background: var(--warn); border-color: var(--warn); color: var(--bg); }
+.feed-tab.active.tab-obs   { background: var(--panel-2); border-color: var(--border); color: var(--text-dim); }
+.feed-rate { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+.feed-rate .dot { color: var(--pos); }
+
+/* Status pills */
+.pill { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px;
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.pill.copied  { background: rgba(74,222,128,0.15); color: var(--pos); border: 1px solid var(--pos); }
+.pill.skipped { background: rgba(251,191,36,0.12); color: var(--warn); border: 1px solid var(--warn); }
+.pill.observe { background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); }
+
+.copyable { cursor: pointer; border-bottom: 1px dotted var(--text-dim); transition: color 0.15s; }
+.copyable:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.copyable.copied { color: var(--pos); border-bottom-color: var(--pos); }
+.copyable.copied::after { content: " ✓"; }
+
+.chip { display: inline-block; padding: 2px 6px; border-radius: 4px;
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+        background: var(--panel-2); color: var(--text-dim); }
+.chip.buy { color: var(--pos); border: 1px solid var(--pos); background: transparent; }
+.chip.sell { color: var(--neg); border: 1px solid var(--neg); background: transparent; }
+
+.closed-filter { font-size: 11px; padding: 3px 10px; }
+.closed-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+
+.filter-section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+.filter-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 10px; }
+.active-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); align-items: center; }
+.filter-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--accent); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+.filter-pill:hover { opacity: 0.9; cursor: pointer; }
+.filter-pill .remove { cursor: pointer; font-weight: bold; }
+.clear-all-btn { padding: 4px 10px; font-size: 10px; border-radius: 4px; background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); cursor: pointer; transition: all 0.2s; }
+.clear-all-btn:hover { background: var(--neg); color: var(--bg); border-color: var(--neg); }
+
+.filter-group { margin-bottom: 12px; }
+.filter-group:last-child { margin-bottom: 0; }
+.filter-group-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; font-weight: 600; }
+.filter-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-toggle { padding: 6px 12px; font-size: 11px; background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+.filter-toggle:hover { background: var(--border); color: var(--text); }
+.filter-toggle.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+.chart-wrap { position: relative; height: 220px; width: 100%; }
+.chart-wrap canvas { position: absolute; inset: 0; }
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+  .kpis { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">●</span> Polymarket Copy Bot — Observe Mode</h1>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <a class="toggle" href="/shadow" style="text-decoration:none;">🌓 Shadow Book →</a>
+    <a class="toggle" href="/sizing" style="text-decoration:none;">⚖️ Sizing Experiment →</a>
+    <a class="toggle" href="/merged" style="text-decoration:none;">🔀 Merged Sizer →</a>
+    <a class="toggle" href="/hybrid" style="text-decoration:none;">🧬 Hybrid Sizer →</a>
+    <a class="toggle" href="/latency" style="text-decoration:none;">⏱️ Latency/Slippage →</a>
+    <a class="toggle" href="/timing" style="text-decoration:none;">🕐 Pre-Game vs In-Play →</a>
+    <button class="toggle" id="themeBtn">Toggle theme</button>
+  </div>
+</header>
+
+<div style="background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:6px; padding:9px 13px; color:var(--text-dim); font-size:12px; line-height:1.5; margin-bottom:14px;">
+  <b>📖 What this is:</b> the <b>live paper-trading bot</b> — real strategy, fake money. It copies top Polymarket traders when
+  <b>4+ leaders agree</b> on the same confident favorite (price 0.60–0.80, resolving within 48h), avoiding derivative bets (spreads, over/under, exact-score).
+  The tabs top-right are <b>what-if experiments</b> that analyze these results — they place no bets:
+  <b>Shadow</b> = bets we skip · <b>Sizing/Merged/Hybrid</b> = how much to stake per bet.
+</div>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+  <div></div>
+  <div style="display: flex; gap: 6px;">
+    <button class="toggle time-filter active" data-period="day">Day</button>
+    <button class="toggle time-filter" data-period="week">Week</button>
+    <button class="toggle time-filter" data-period="month">Month</button>
+    <button class="toggle time-filter" data-period="all">All Time</button>
+  </div>
+</div>
+
+<div class="filter-section">
+  <div class="filter-header">Filters</div>
+
+  <div class="active-filters">
+    <span style="color: var(--text-dim); font-size: 10px; font-weight: 600;">Active:</span>
+    <div id="active-filter-pills" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; flex: 1;"></div>
+    <button class="clear-all-btn" id="clear-all-filters" style="display: none;">Clear All</button>
+  </div>
+
+  <div class="filter-group">
+    <div class="filter-group-label">Category</div>
+    <div class="filter-buttons">
+      <button class="filter-toggle" data-filter-type="category" data-filter-value="sports">Sports</button>
+      <button class="filter-toggle" data-filter-type="category" data-filter-value="crypto">Crypto</button>
+      <button class="filter-toggle" data-filter-type="category" data-filter-value="politics">Politics</button>
+      <button class="filter-toggle" data-filter-type="category" data-filter-value="culture">Culture</button>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <div class="filter-group-label">Result</div>
+    <div class="filter-buttons">
+      <button class="filter-toggle" data-filter-type="result" data-filter-value="won">Won</button>
+      <button class="filter-toggle" data-filter-type="result" data-filter-value="lost">Lost</button>
+      <button class="filter-toggle" data-filter-type="result" data-filter-value="exited">Exited</button>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <div class="filter-group-label">Leader Tier</div>
+    <div class="filter-buttons">
+      <button class="filter-toggle" data-filter-type="leader-tier" data-filter-value="top10">Top 10</button>
+      <button class="filter-toggle" data-filter-type="leader-tier" data-filter-value="top25">Top 25</button>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <div class="filter-group-label">Trade Duration</div>
+    <div class="filter-buttons">
+      <button class="filter-toggle" data-filter-type="duration" data-filter-value="fast">Fast (&lt;1h)</button>
+      <button class="filter-toggle" data-filter-type="duration" data-filter-value="medium">Medium (1-12h)</button>
+      <button class="filter-toggle" data-filter-type="duration" data-filter-value="long">Long (12h+)</button>
+    </div>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Bankroll Equity</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">Total cash + open position value</div>
+    </div>
+    <div class="value" id="kpi-equity">—</div>
+  </div>
+
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Win Rate</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">% of closed trades that were profitable</div>
+    </div>
+    <div class="value" id="kpi-winrate">—</div>
+  </div>
+
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Realized PnL</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">Total profit from all closed positions</div>
+    </div>
+    <div class="value" id="kpi-pnl">—</div>
+  </div>
+
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Total Trades</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">Sum of closed + exited positions</div>
+    </div>
+    <div class="value" id="kpi-trades">—</div>
+  </div>
+
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Open Positions</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">Active positions currently being held</div>
+    </div>
+    <div class="value" id="kpi-open">—</div>
+  </div>
+
+  <div class="kpi">
+    <div class="label-wrap">
+      <span class="label">Last Signal</span>
+      <span class="help-icon">?</span>
+      <div class="tooltip">Time since last new position opened</div>
+    </div>
+    <div class="value" id="kpi-last">—</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel full">
+    <h2>Open paper positions</h2>
+    <div style="max-height: 300px; overflow-y: auto;">
+    <table style="table-layout: fixed; width: 100%;">
+      <colgroup>
+        <col style="width:80px"><col style="width:150px"><col style="width:90px">
+        <col style="width:58px"><col style="width:65px"><col style="width:72px">
+        <col style="width:105px"><col style="width:72px"><col style="width:58px">
+        <col style="width:85px"><col style="width:32px"><col style="width:72px">
+      </colgroup>
+      <thead><tr>
+        <th>
+          <span class="th-tip">Category
+            <span class="tip-icon">?</span>
+            <span class="tip-box tip-left">The market category (Sports, Crypto, Politics…). We block Politics and unknown categories from entry.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Market
+            <span class="tip-icon">?</span>
+            <span class="tip-box">The prediction market we have an open bet on. Click the link to view it live on Polymarket.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">My Bet
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Which outcome we are holding and the direction.<br><br>Green = we bet this outcome WINS (BUY).<br>Red = we bet this outcome LOSES (SELL/NO).</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Entry
+            <span class="tip-icon">?</span>
+            <span class="tip-box">The price we paid per share when we opened this position. Polymarket prices run 0–1, where 1.00 = certainty. E.g. 0.62 means the market implied a 62% chance at entry.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Current
+            <span class="tip-icon">?</span>
+            <span class="tip-box">The live mid-price for this outcome right now. Refreshes every 60 seconds. Higher than entry = market has moved in our favour.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Cost
+            <span class="tip-icon">?</span>
+            <span class="tip-box">How much paper money we staked on this position (entry price × shares bought). This is what we risk losing if the outcome is wrong.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Pot. Payout
+            <span class="tip-icon">?</span>
+            <span class="tip-box">If this position resolves YES: total cash returned (shares × $1.00) and the implied return % over our cost. E.g. $120 (+33%) means we get $120 back on a $90 stake.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Unreal. P&L
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Unrealised profit or loss right now if we were to close at the current price. Green = winning, Red = losing. This fluctuates until the market resolves.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">P&L %
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Price movement since entry as a percentage. Shows how far the market has moved in our direction regardless of position size. +10% means the probability has risen 10 points since we entered.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Resolves
+            <span class="tip-icon">?</span>
+            <span class="tip-box">When this market is scheduled to close and pay out. Orange = resolves within 7 days. Green = resolving imminently.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Str
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Signal strength — how many leaders were in agreement when we entered this position. ×4 = 4 leaders agreed. Higher = stronger conviction.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Held
+            <span class="tip-icon">?</span>
+            <span class="tip-box">How long this position has been open. Longer holds tend to win more — positions under 1h are still settling. ⚠️ shown if price has dropped close to the adverse-exit threshold (entry × 0.65).</span>
+          </span>
+        </th>
+      </tr></thead>
+      <tbody id="positions"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="panel full">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+      <h2 style="margin:0">Live signal feed</h2>
+      <div class="feed-tabs">
+        <button class="feed-tab active"        data-feed="copied">✅ Copied</button>
+        <button class="feed-tab active tab-skip" data-feed="skipped">⏭ Skipped</button>
+        <button class="feed-tab tab-obs"       data-feed="observe">👁 Observe</button>
+      </div>
+      <span class="feed-rate"><span class="dot">●</span> <span id="feed-rate">—</span> signals/min</span>
+    </div>
+    <div style="display:grid; grid-template-columns: 58px 90px 1fr auto; gap:8px; padding: 0 8px 6px;
+                font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim);
+                border-bottom: 1px solid var(--border); margin-bottom:4px;">
+      <span>Time</span><span>Status</span><span>Signal</span><span>Action</span>
+    </div>
+    <div class="feed" id="feed"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Paper bankroll ($10,000 start)</h2>
+    <div class="chart-wrap"><canvas id="pnlChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Daily P&L</h2>
+    <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+  </div>
+
+
+  <div class="panel full">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+      <h2 style="margin:0">Closed positions</h2>
+      <button class="toggle closed-filter active" data-status="all_closed" data-result="all">All</button>
+      <button class="toggle closed-filter" data-status="all_closed" data-result="won">✅ Won</button>
+      <button class="toggle closed-filter" data-status="all_closed" data-result="lost">❌ Lost</button>
+      <button class="toggle closed-filter" data-status="exited" data-result="all">⚠️ Exited only</button>
+      <span class="dim" id="closed-count" style="font-size:11px; margin-left:4px;"></span>
+    </div>
+    <div style="max-height: 300px; overflow-y: auto;">
+    <table style="table-layout: fixed; width: 100%;">
+      <colgroup>
+        <col style="width:70px"><col style="width:155px"><col style="width:75px">
+        <col style="width:58px"><col style="width:68px"><col style="width:72px">
+        <col style="width:80px"><col style="width:68px"><col style="width:55px">
+        <col style="width:40px"><col style="width:32px">
+      </colgroup>
+      <thead><tr>
+        <th>
+          <span class="th-tip">Closed
+            <span class="tip-icon">?</span>
+            <span class="tip-box tip-left">How long ago this position was resolved or exited.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Market
+            <span class="tip-icon">?</span>
+            <span class="tip-box">The prediction market. Click to view on Polymarket.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Result
+            <span class="tip-icon">?</span>
+            <span class="tip-box">✅ Won — market resolved in our favour.<br>❌ Lost — market resolved against us.<br>⚠️ Exited — we sold early (adverse exit or leaders bailed).</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Entry
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Price per share when we opened. 0–1 scale (e.g. 0.62 = 62% implied probability at entry).</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Close
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Price per share when the position closed. 1.00 = resolved YES (winner). 0.00 = resolved NO (loser).</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Cost
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Amount staked (entry price × shares). This is what was at risk.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">PnL
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Profit or loss in dollars. Green = profitable, Red = loss.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Return
+            <span class="tip-icon">?</span>
+            <span class="tip-box">PnL as a percentage of the amount staked. Normalises across different position sizes — a $50 gain on a $100 stake (+50%) is better than $50 on a $500 stake (+10%).</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Hold
+            <span class="tip-icon">?</span>
+            <span class="tip-box">How long the position was held before closing. Data shows 1–6h holds are the most profitable bucket.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Cat
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Market category: ⚽ Sports, ₿ Crypto, 🏛 Politics, 🎬 Culture.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Str
+            <span class="tip-icon">?</span>
+            <span class="tip-box tip-right">Signal strength — number of leaders who agreed when we entered. Higher = stronger conviction.</span>
+          </span>
+        </th>
+      </tr></thead>
+      <tbody id="closed-positions"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="panel full">
+    <h2>Trade Analytics</h2>
+    <!-- KPI summary cards -->
+    <div id="analytics-kpis" style="display:grid; grid-template-columns: repeat(8,1fr); gap:8px; margin-bottom:16px;"></div>
+    <!-- 4-column breakdown grid -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:14px;">
+      <div>
+        <h2>By Category</h2>
+        <table style="table-layout:fixed;width:100%">
+          <colgroup><col style="width:auto"><col style="width:46px"><col style="width:48px"><col style="width:72px"></colgroup>
+          <thead><tr><th>Category</th><th class="num">Trades</th><th class="num">WR%</th><th class="num">PnL</th></tr></thead>
+          <tbody id="analytics-category"></tbody>
+        </table>
+      </div>
+      <div>
+        <h2>By Signal Strength</h2>
+        <table style="table-layout:fixed;width:100%">
+          <colgroup><col style="width:auto"><col style="width:46px"><col style="width:48px"><col style="width:72px"></colgroup>
+          <thead><tr><th>Leaders</th><th class="num">Trades</th><th class="num">WR%</th><th class="num">PnL</th></tr></thead>
+          <tbody id="analytics-strength"></tbody>
+        </table>
+      </div>
+      <div>
+        <h2>By Hold Time</h2>
+        <table style="table-layout:fixed;width:100%">
+          <colgroup><col style="width:auto"><col style="width:46px"><col style="width:48px"><col style="width:72px"></colgroup>
+          <thead><tr><th>Hold</th><th class="num">Trades</th><th class="num">WR%</th><th class="num">PnL</th></tr></thead>
+          <tbody id="analytics-hold"></tbody>
+        </table>
+      </div>
+      <div>
+        <h2>By Entry Price</h2>
+        <table style="table-layout:fixed;width:100%">
+          <colgroup><col style="width:auto"><col style="width:46px"><col style="width:48px"><col style="width:72px"></colgroup>
+          <thead><tr><th>Entry</th><th class="num">Trades</th><th class="num">WR%</th><th class="num">PnL</th></tr></thead>
+          <tbody id="analytics-entry"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel full">
+    <h2>Trade Journal</h2>
+    <div style="max-height: 400px; overflow-y: auto;">
+    <table style="table-layout:fixed;width:100%">
+      <colgroup>
+        <col style="width:68px"><col style="width:160px"><col style="width:75px">
+        <col style="width:58px"><col style="width:68px"><col style="width:72px">
+        <col style="width:68px"><col style="width:55px"><col style="width:32px"><col style="width:32px">
+      </colgroup>
+      <thead><tr>
+        <th>Closed</th><th>Market</th><th>Result</th>
+        <th class="num">Entry</th><th class="num">Close</th>
+        <th class="num">PnL</th><th class="num">Return</th>
+        <th>Hold</th><th class="num">Cat</th><th class="num">Str</th>
+      </tr></thead>
+      <tbody id="analytics-journal"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="panel full">
+    <h2>Leaderboard</h2>
+    <div style="max-height: 420px; overflow-y: auto;">
+    <table style="cursor: pointer; table-layout: fixed; width: 100%;">
+      <colgroup>
+        <col style="width:22px"><col style="width:14px"><col style="width:105px">
+        <col style="width:88px"><col style="width:60px">
+        <col style="width:90px"><col style="width:62px">
+        <col style="width:55px"><col style="width:100px">
+        <col style="width:65px"><col style="width:90px"><col style="width:110px">
+      </colgroup>
+      <thead><tr style="cursor: pointer; user-select: none;">
+        <th>#</th>
+        <th>
+          <span class="th-tip">
+            <span class="tip-icon">?</span>
+            <span class="tip-box tip-left">🟢 Active — leader is being monitored and copied.<br>🔴 Auto-excluded — recently underperforming (win rate or ROI below threshold). Signals ignored.</span>
+          </span>
+        </th>
+        <th>Wallet</th>
+        <th>
+          <span class="th-tip">Bot Score
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Composite score ranking how useful this leader is <em>for our bot</em>.<br><br>• 40% Copy Win Rate — our actual results copying them<br>• 25% PM Rank — their standing on Polymarket's leaderboard<br>• 20% 30d Form — recent win rate trend<br>• 15% Persistence — appeared across multiple PM leaderboard snapshots<br><br>Leaders with fewer than 5 copied trades fall back to the Polymarket score.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">PM Rank
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Best rank this leader has achieved on Polymarket's own leaderboard (lower = better). Sourced from our seed snapshots. #1 means they topped the Polymarket rankings at some point.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">7d Form
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Wins and losses from trades we copied in the last 7 days, with win rate %. A quick pulse on current momentum.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">30d WR%
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Win rate across all trades we copied from this leader in the last 30 days. More stable than 7d — use this as the primary performance signal.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Streak
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Current consecutive winning streak on trades we copied from this leader. Resets to 0 on any loss.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Copied (30d / All)
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Number of trades we have copied from this leader.<br><br>Left: last 30 days<br>Right: all time<br><br>Higher numbers = more data to trust their Copy WR%.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Copy WR%
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Our win rate on all trades we've copied from this leader (all time). Shown only when ≥5 copied trades exist — below that, sample size is too small to be meaningful.</span>
+          </span>
+        </th>
+        <th class="num">
+          <span class="th-tip">Copy PnL
+            <span class="tip-icon">?</span>
+            <span class="tip-box">Wins vs losses on all trades we copied from this leader. Green = positive record, red = negative. Full $ PnL breakdown coming soon.</span>
+          </span>
+        </th>
+        <th>
+          <span class="th-tip">Categories
+            <span class="tip-icon">?</span>
+            <span class="tip-box tip-right">Market categories this leader trades (Sports, Crypto, Politics, etc.). Helps identify specialists vs generalists.</span>
+          </span>
+        </th>
+      </tr></thead>
+      <tbody id="leaders"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ---- theme toggle ----
+const savedTheme = localStorage.getItem("theme") || "dark";
+document.documentElement.setAttribute("data-theme", savedTheme);
+$("themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+  if (pnlChart) { pnlChart.destroy(); pnlChart = null; drawBankroll(); }
+  if (dailyChart) { dailyChart.destroy(); dailyChart = null; drawDailyChart(); }
+};
+
+// ---- helpers ----
+const shortAddr = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const copyable = (full, display) =>
+  `<span class="copyable addr" data-copy="${full}" title="Click to copy: ${full}">${display}</span>`;
+const polyLink = (slug, label) =>
+  slug ? `<a href="https://polymarket.com/market/${slug}" target="_blank" style="color:var(--accent);text-decoration:none">${label}</a>` : label;
+const fmtRelTime = (ts) => {
+  if (!ts) return "—";
+  const d = Date.now() / 1000 - ts;
+  if (d < 60) return `${Math.floor(d)}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+};
+const fmtUsd = (n) => "$" + Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const truncTitle = (t, n=35) => t && t.length > n ? t.slice(0, n) + "…" : (t || "—");
+
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest(".copyable");
+  if (!el) return;
+  const val = el.dataset.copy;
+  try {
+    await navigator.clipboard.writeText(val);
+    el.classList.add("copied");
+    setTimeout(() => el.classList.remove("copied"), 1200);
+  } catch (err) {
+    const ta = document.createElement("textarea");
+    ta.value = val; document.body.appendChild(ta);
+    ta.select(); document.execCommand("copy"); ta.remove();
+    el.classList.add("copied");
+    setTimeout(() => el.classList.remove("copied"), 1200);
+  }
+});
+
+// ---- KPIs ----
+let cachedAnalytics = null;
+let currentTimePeriod = "day";
+
+async function loadStats() {
+  const [s, b, a] = await Promise.all([
+    fetch("/api/stats").then(r => r.json()),
+    fetch("/api/bankroll").then(r => r.json()),
+    fetch("/api/analytics").then(r => r.json()),
+  ]);
+  cachedAnalytics = a;
+
+  $("kpi-equity").textContent  = fmtUsd(b.equity);
+  $("kpi-open").textContent = b.open_positions;
+  $("kpi-last").textContent = fmtRelTime(s.last_signal_ts);
+
+  renderActiveFilters();
+  updateKPIs();
+}
+
+function updateKPIsByPeriod(period) {
+  currentTimePeriod = period;
+  updateKPIs();
+}
+
+function updateKPIs() {
+  if (!cachedAnalytics) return;
+
+  const now = Date.now() / 1000;
+  let cutoffSeconds = 86400; // default: 1 day
+
+  if (currentTimePeriod === "week") cutoffSeconds = 7 * 86400;
+  else if (currentTimePeriod === "month") cutoffSeconds = 30 * 86400;
+  else if (currentTimePeriod === "all") cutoffSeconds = 999999999; // all time
+
+  const cutoff = now - cutoffSeconds;
+
+  // Filter journal entries
+  let filtered = (cachedAnalytics.journal || []).filter(j => (j.closed_ts || 0) >= cutoff);
+
+  // Apply category filter
+  if (activeFilters.category.length > 0) {
+    filtered = filtered.filter(j => activeFilters.category.includes(j.category));
+  }
+
+  // Apply result filter (won/lost/exited)
+  if (activeFilters.result.length > 0) {
+    filtered = filtered.filter(j => {
+      const pnl = j.pnl_usd || 0;
+      if (activeFilters.result.includes("won")) return pnl > 0;
+      if (activeFilters.result.includes("lost")) return pnl <= 0 && j.status === "closed";
+      if (activeFilters.result.includes("exited")) return j.status === "exited";
+      return false;
+    });
+    // Refilter to include ANY matching result type (OR logic)
+    filtered = (cachedAnalytics.journal || []).filter(j => (j.closed_ts || 0) >= cutoff);
+    if (activeFilters.category.length > 0) {
+      filtered = filtered.filter(j => activeFilters.category.includes(j.category));
+    }
+    filtered = filtered.filter(j => {
+      const pnl = j.pnl_usd || 0;
+      let matches = false;
+      if (activeFilters.result.includes("won") && pnl > 0) matches = true;
+      if (activeFilters.result.includes("lost") && pnl <= 0 && j.status === "closed") matches = true;
+      if (activeFilters.result.includes("exited") && j.status === "exited") matches = true;
+      return matches;
+    });
+  }
+
+  // Apply leader tier filter
+  if (activeFilters["leader-tier"].length > 0) {
+    filtered = filtered.filter(j => {
+      const rank = j.leader_best_seed_rank || 999;
+      let matches = false;
+      if (activeFilters["leader-tier"].includes("top10") && rank <= 10) matches = true;
+      if (activeFilters["leader-tier"].includes("top25") && rank <= 25) matches = true;
+      return matches;
+    });
+  }
+
+  // Apply duration filter
+  if (activeFilters.duration.length > 0) {
+    filtered = filtered.filter(j => {
+      const hold = ((j.closed_ts || 0) - (j.opened_ts || 0)) / 3600;
+      let matches = false;
+      if (activeFilters.duration.includes("fast") && hold < 1) matches = true;
+      if (activeFilters.duration.includes("medium") && hold >= 1 && hold <= 12) matches = true;
+      if (activeFilters.duration.includes("long") && hold > 12) matches = true;
+      return matches;
+    });
+  }
+
+  // Recalculate metrics
+  const wins = filtered.filter(j => (j.pnl_usd || 0) > 0).length;
+  const totalTrades = filtered.length;
+  const winRate = totalTrades > 0 ? (wins / totalTrades * 100) : 0;
+  const totalPnL = filtered.reduce((sum, j) => sum + (j.pnl_usd || 0), 0);
+
+  // Update KPI displays
+  $("kpi-winrate").textContent = winRate.toFixed(1) + "%";
+  $("kpi-winrate").className = "value " + (winRate > 50 ? "pos" : winRate < 40 ? "neg" : "");
+
+  $("kpi-trades").textContent = totalTrades;
+
+  $("kpi-pnl").textContent = (totalPnL >= 0 ? "+" : "") + fmtUsd(totalPnL);
+  $("kpi-pnl").className = "value " + (totalPnL > 0 ? "pos" : totalPnL < 0 ? "neg" : "");
+
+  // Update button states and filter pills
+  updateAllFilterButtonStates();
+  renderActiveFilters();
+}
+
+// ---- leaders table with sorting ----
+let leadersSortBy = "bot_score";
+let leadersSortAsc = false;
+
+async function loadLeaders() {
+  const r = await fetch("/api/leaders?limit=50").then(r => r.json());
+  let leaders = r.leaders;
+
+  // Sort leaders
+  leaders.sort((a, b) => {
+    let aVal, bVal;
+    switch(leadersSortBy) {
+      case "bot_score":  aVal = a.bot_score || 0;       bVal = b.bot_score || 0;       break;
+      case "30d_wr":     aVal = a.month_win_rate || 0;   bVal = b.month_win_rate || 0;   break;
+      case "streak":     aVal = a.win_streak || 0;       bVal = b.win_streak || 0;       break;
+      case "copy_wr":    aVal = a.copied_total > 0 ? a.copied_wins / a.copied_total : 0;
+                         bVal = b.copied_total > 0 ? b.copied_wins / b.copied_total : 0; break;
+      case "copied":     aVal = a.copied_total || 0;     bVal = b.copied_total || 0;     break;
+      case "pm_rank":    aVal = -(a.best_seed_rank || 999); bVal = -(b.best_seed_rank || 999); break;
+      default: aVal = a.bot_score || 0; bVal = b.bot_score || 0;
+    }
+    return leadersSortAsc ? aVal - bVal : bVal - aVal;
+  });
+
+  const rows = leaders.map((l, i) => {
+    // Status dot
+    const isExcluded = !!l.excluded_reason;
+    const statusDot = isExcluded
+      ? `<span title="Auto-excluded: ${l.excluded_reason}" style="color:var(--neg);font-size:10px;">●</span>`
+      : `<span title="Active" style="color:var(--pos);font-size:10px;">●</span>`;
+
+    // Bot Score bar (now actually differentiated)
+    const botScore = l.bot_score || 0;
+    const botPct = Math.round(botScore * 100);
+    const botCls = botScore >= 0.6 ? "pos" : botScore >= 0.4 ? "warn" : "neg";
+    const botScoreStr = `<span class="score-bar"><span style="width:${botPct}%;background:var(--${botCls})"></span></span><span class="${botCls}">${botScore.toFixed(2)}</span>`;
+
+    // PM Rank
+    const pmRank = l.best_seed_rank && l.best_seed_rank < 999
+      ? `<span class="${l.best_seed_rank <= 10 ? 'pos' : l.best_seed_rank <= 50 ? 'warn' : 'dim'}">#${l.best_seed_rank}</span>`
+      : `<span class="dim">—</span>`;
+
+    // 7d form
+    const wt = l.week_trades || 0;
+    const ww = l.week_wins || 0;
+    const wl = wt - ww;
+    const wwr = wt > 0 ? Math.round(ww / wt * 100) : null;
+    const formCls = wwr === null ? "dim" : wwr >= 50 ? "pos" : "neg";
+    const formStr = wt === 0 ? `<span class="dim">—</span>` : `<span class="${formCls}">${ww}W/${wl}L (${wwr}%)</span>`;
+
+    // 30-day win rate
+    const monthWr = l.month_win_rate || 0;
+    const monthWrCls = monthWr >= 55 ? "pos" : monthWr >= 45 ? "warn" : monthWr === 0 ? "dim" : "neg";
+    const monthWrStr = monthWr === 0 ? `<span class="dim">—</span>` : `<span class="${monthWrCls}">${monthWr.toFixed(1)}%</span>`;
+
+    // Win streak
+    const streak = l.win_streak || 0;
+    const streakStr = streak === 0 ? `<span class="dim">—</span>` : `<span class="pos">${streak}W</span>`;
+
+    // Copied: merged "30d / All" column
+    const copiedTotal = l.copied_total || 0;
+    const copied30d   = l.copied_30d || 0;
+    const copiedWins  = l.copied_wins || 0;
+    const copyWrPct   = copiedTotal >= 5 ? Math.round(copiedWins / copiedTotal * 100) : null;
+    const copiedMerged = copiedTotal === 0
+      ? `<span class="dim">—</span>`
+      : `<span title="${copiedWins}W / ${copiedTotal - copiedWins}L all-time">${copied30d} / ${copiedTotal}</span>`;
+
+    // Copy WR%
+    const copyWrStr = copyWrPct === null
+      ? `<span class="dim" title="Need 5+ copied trades">—</span>`
+      : `<span class="${copyWrPct >= 55 ? 'pos' : copyWrPct >= 45 ? 'warn' : 'neg'}">${copyWrPct}%</span>`;
+
+    // Copy PnL placeholder (PnL not stored per leader yet — show wins/losses)
+    const copyPnlStr = copiedTotal === 0
+      ? `<span class="dim">—</span>`
+      : copyWrPct !== null
+        ? `<span class="${copyWrPct >= 50 ? 'pos' : 'neg'}">${copiedWins}W / ${copiedTotal - copiedWins}L</span>`
+        : `<span class="dim">${copiedWins}W / ${copiedTotal - copiedWins}L</span>`;
+
+    return `<tr style="${isExcluded ? 'opacity:0.5' : ''}">
+      <td class="dim">${i + 1}</td>
+      <td>${statusDot}</td>
+      <td>${copyable(l.wallet, shortAddr(l.wallet))}</td>
+      <td>${botScoreStr}</td>
+      <td class="num">${pmRank}</td>
+      <td class="num">${formStr}</td>
+      <td class="num">${monthWrStr}</td>
+      <td class="num">${streakStr}</td>
+      <td class="num">${copiedMerged}</td>
+      <td class="num">${copyWrStr}</td>
+      <td class="num">${copyPnlStr}</td>
+      <td>${(l.categories.filter(c => c !== 'all').slice(0, 3)).map(c => `<span class="chip">${c}</span>`).join(" ") || '<span class="dim">—</span>'}</td>
+    </tr>`;
+  }).join("");
+  $("leaders").innerHTML = rows || `<tr><td colspan="12" class="dim" style="text-align:center; padding:24px">
+    No leaders yet.</td></tr>`;
+
+  // Update sort arrows only (click handlers are attached once in initLeaderSort)
+  updateLeaderSortArrows();
+}
+
+// col index → sort key
+const LEADER_SORT_MAP = {3: "bot_score", 4: "pm_rank", 6: "30d_wr", 7: "streak", 8: "copied", 9: "copy_wr"};
+
+function updateLeaderSortArrows() {
+  const table = $("leaders") && $("leaders").parentElement;
+  if (!table) return;
+  table.querySelectorAll("thead th").forEach((th, idx) => {
+    const key = LEADER_SORT_MAP[idx];
+    if (!key) return;
+    th.querySelectorAll(".sort-arrow").forEach(el => el.remove());
+    const isActive = leadersSortBy === key;
+    const arrow = document.createElement("span");
+    arrow.className = "sort-arrow";
+    arrow.textContent = isActive ? (leadersSortAsc ? " ↑" : " ↓") : " ↕";
+    arrow.style.opacity = isActive ? "1" : "0.3";
+    const tip = th.querySelector(".th-tip");
+    if (tip) tip.after(arrow); else th.appendChild(arrow);
+  });
+}
+
+function initLeaderSort() {
+  const table = $("leaders") && $("leaders").parentElement;
+  if (!table) return;
+  table.querySelectorAll("thead th").forEach((th, idx) => {
+    const key = LEADER_SORT_MAP[idx];
+    if (!key) return;
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      leadersSortAsc = leadersSortBy === key ? !leadersSortAsc : false;
+      leadersSortBy = key;
+      loadLeaders();
+    });
+  });
+}
+
+// ---- live feed ----
+let feedEl, knownSigIds = new Set();
+let allSignals = [];          // full buffer for re-filtering
+let activeFeedTabs = new Set(["copied", "skipped"]);  // default: show copied + skipped
+let signalTimestamps = [];    // for rate calculation
+
+const catEmojiFeed = {sports:"⚽",crypto:"₿",politics:"🏛",culture:"🎬",other:"📌",unknown:"❓"};
+
+function feedType(s) {
+  if (s.filter_status === "copy" && s.position_opened === 1) return "copied";
+  if (s.filter_status === "copy" && s.position_opened === 0) return "skipped";
+  return "observe";
+}
+
+function cleanReason(reason, type) {
+  if (!reason) return "";
+  return reason
+    .replace(/already_in_market:pos_\d+\(([^)]+)\)/, "dup: $1")
+    .replace(/already_open:pos_\d+/, "duplicate")
+    .replace(/too_far:(\d+)h>(\d+)h/, "too far: $1h > $2h limit")
+    .replace(/exposure_cap.*/, "exposure cap")
+    .replace(/game_slug_cap:[^(]+\(([^)]+)\)/, "game cap ($1)")
+    .replace(/blocked_category:(\w+)/, "blocked: $1")
+    .replace(/price_too_low:([^(]+)\(([^)]+)\)/, "price $1 ($2)")
+    .replace(/cooldown:(.+)/, "cooldown: $1")
+    .replace(/opposing_side_blocked:.*/, "opposing side blocked")
+    .replace(/same_game_title_blocked:(.{0,20}).*/, "same game: $1")
+    .replace(/streak_blocked:(.+)/, "streak: $1")
+    .replace(/conviction:(\d+),weighted_v2:([\d.]+)/, "$1 leaders · score $2");
+}
+
+function renderSignal(s, isNew = false) {
+  const type = feedType(s);
+  const isCopy = s.filter_status === "copy";
+  const title  = s.market_title || "";
+  const slug   = s.market_slug  || "";
+  const cat    = s.category || "other";
+  const catIcon = catEmojiFeed[cat] || "📌";
+
+  // Status pill
+  let pill, actionHtml;
+  if (type === "copied") {
+    pill = `<span class="pill copied">✅ Copied</span>`;
+    const wt = s.weighted_conviction ? ` · score ${Number(s.weighted_conviction).toFixed(1)}` : "";
+    actionHtml = `<span class="pos" style="font-size:11px">×${s.signal_strength || 1} leaders${wt}</span>`;
+  } else if (type === "skipped") {
+    pill = `<span class="pill skipped">⏭ Skipped</span>`;
+    const reason = cleanReason(s.position_reason || s.filter_reason, type);
+    actionHtml = `<span class="warn" style="font-size:11px">${reason}</span>`;
+  } else {
+    pill = `<span class="pill observe">👁 Observe</span>`;
+    const reason = cleanReason(s.filter_reason, type);
+    actionHtml = `<span class="dim" style="font-size:11px">${reason}</span>`;
+  }
+
+  // Market + leader line
+  const shortTitle = title ? (title.length > 40 ? title.slice(0,40)+"…" : title) : s.market.slice(0,20)+"…";
+  const marketStr = slug
+    ? `<a href="https://polymarket.com/market/${slug}" target="_blank" title="${title}"
+          style="color:var(--accent);text-decoration:none">${shortTitle}</a>`
+    : `<span title="${title}">${shortTitle}</span>`;
+
+  const sideCls = s.side === "BUY" ? "buy" : "sell";
+
+  const div = document.createElement("div");
+  div.className = "feed-row" + (isNew ? " new" : "");
+  div.dataset.feedType = type;
+  div.innerHTML = `
+    <span class="dim" style="font-size:11px;padding-top:2px">${fmtRelTime(s.observed_ts)}</span>
+    <span style="padding-top:1px">${pill}</span>
+    <span>
+      <span style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:2px">
+        ${copyable(s.leader_wallet, shortAddr(s.leader_wallet))}
+        <span class="chip ${sideCls}">${s.side}</span>
+        <b>${s.outcome || "—"}</b>
+        <span class="dim">@ ${Number(s.leader_price||0).toFixed(3)}</span>
+        <span class="chip" style="font-size:9px">${catIcon} ${cat}</span>
+        ${(s.conviction_count||0) > 1 ? `<span class="dim" style="font-size:11px">🎯 ${s.conviction_count}</span>` : ""}
+      </span>
+      <span class="dim" style="font-size:11px">${marketStr}</span>
+    </span>
+    <span style="text-align:right;padding-top:2px">${actionHtml}</span>
+  `;
+  return div;
+}
+
+function applyFeedFilter() {
+  feedEl.innerHTML = "";
+  const visible = allSignals.filter(s => activeFeedTabs.has(feedType(s)));
+  if (visible.length === 0) {
+    feedEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:12px">No signals match current filter</div>`;
+    return;
+  }
+  visible.forEach(s => feedEl.appendChild(renderSignal(s, false)));
+}
+
+function updateFeedRate() {
+  const now = Date.now() / 1000;
+  const cutoff = now - 60;
+  signalTimestamps = signalTimestamps.filter(t => t > cutoff);
+  const rate = signalTimestamps.length;
+  const el = $("feed-rate");
+  if (el) el.textContent = rate;
+}
+
+async function loadSignals() {
+  feedEl = $("feed");
+  const r = await fetch("/api/signals?since=0&limit=100").then(r => r.json());
+  allSignals = r.signals || [];
+  applyFeedFilter();
+
+  // Wire up tab buttons
+  document.querySelectorAll(".feed-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.feed;
+      if (activeFeedTabs.has(tab)) {
+        activeFeedTabs.delete(tab);
+        btn.classList.remove("active");
+      } else {
+        activeFeedTabs.add(tab);
+        btn.classList.add("active");
+      }
+      applyFeedFilter();
+    });
+  });
+}
+
+function connectSSE() {
+  const ev = new EventSource("/api/stream");
+  ev.onmessage = (e) => {
+    if (!e.data) return;
+    try {
+      const s = JSON.parse(e.data);
+      if (knownSigIds.has(s.id)) return;
+      knownSigIds.add(s.id);
+      allSignals.unshift(s);
+      if (allSignals.length > 100) allSignals.pop();
+      signalTimestamps.push(Date.now() / 1000);
+      updateFeedRate();
+      if (activeFeedTabs.has(feedType(s))) {
+        if (feedEl.firstChild?.style?.textAlign === "center") feedEl.innerHTML = "";
+        const row = renderSignal(s, true);
+        feedEl.insertBefore(row, feedEl.firstChild);
+        while (feedEl.childElementCount > 100) feedEl.lastChild.remove();
+      }
+      loadStats(); loadPositions(); loadClosedPositions();
+    } catch (err) { console.error(err); }
+  };
+  ev.onerror = () => { ev.close(); setTimeout(connectSSE, 3000); };
+}
+
+setInterval(updateFeedRate, 15000);
+
+// ---- open positions table ----
+async function loadPositions() {
+  const r = await fetch("/api/live_positions").then(r => r.json());
+  const catEmoji = {sports: "⚽", crypto: "₿", politics: "🏛", culture: "🎬", other: "📌"};
+  const rows = r.positions.map(p => {
+    const title = p.market_title || p.market.slice(0, 20) + "…";
+    const slug = p.market_slug || "";
+    const shortTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;
+    const marketLink = slug
+      ? `<a href="https://polymarket.com/market/${slug}" target="_blank" style="color:var(--accent);text-decoration:none" title="${title}">${shortTitle}</a>`
+      : `<span title="${title}">${shortTitle}</span>`;
+    const cat = p.category || "other";
+    const catLabel = (catEmoji[cat] || "📌") + " " + cat.charAt(0).toUpperCase() + cat.slice(1);
+    const betDesc = p.side === "BUY"
+      ? `<span class="pos"><b>${p.outcome || "Yes"}</b> wins</span>`
+      : `<span class="neg"><b>${p.outcome || "Yes"}</b> loses</span>`;
+    let resolves = "—";
+    if (p.end_date) {
+      const d = new Date(p.end_date);
+      if (!isNaN(d)) {
+        const now = new Date();
+        const diffMs = d - now;
+        const diffDays = Math.ceil(diffMs / 86400000);
+        const dateStr = d.toLocaleDateString([], {month:"short", day:"numeric"});
+        const hoursLeft = diffMs / 3600000;
+        if (hoursLeft < -3) resolves = `<span class="warn" title="Past end date — waiting for Polymarket to officially close this market">⏳ Pending</span>`;
+        else if (diffDays <= 0) resolves = `<span class="pos">${dateStr} (any time)</span>`;
+        else if (diffDays <= 1) resolves = `<span class="warn">${dateStr} (today)</span>`;
+        else if (diffDays <= 7) resolves = `<span class="warn">${dateStr} (${diffDays}d)</span>`;
+        else resolves = `${dateStr} (${diffDays}d)`;
+      } else {
+        resolves = p.end_date.slice(0, 10);
+      }
+    }
+    // Current price + unrealized P&L
+    const cur = p.current_price != null ? Number(p.current_price) : null;
+    const entry = Number(p.entry_price);
+    const priceArrow = cur != null
+      ? (cur > entry ? `<span class="pos">↑</span>` : cur < entry ? `<span class="neg">↓</span>` : `<span class="dim">→</span>`)
+      : "";
+    const curPriceStr = cur != null
+      ? `${priceArrow} ${cur.toFixed(3)}`
+      : `<span class="dim">…</span>`;
+    const unreal = p.unrealized_pnl != null
+      ? `<span class="${p.unrealized_pnl >= 0 ? 'pos' : 'neg'}">${p.unrealized_pnl >= 0 ? "+" : ""}${fmtUsd(p.unrealized_pnl)}</span>`
+      : `<span class="dim">—</span>`;
+    // P&L %
+    const pnlPct = cur != null
+      ? ((cur - entry) / entry * 100)
+      : null;
+    const pnlPctStr = pnlPct != null
+      ? `<span class="${pnlPct >= 0 ? 'pos' : 'neg'}">${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%</span>`
+      : `<span class="dim">—</span>`;
+    // Potential payout
+    const potPayout = p.shares * 1.0;
+    const retPct = ((1 / entry) - 1) * 100;
+    const payoutCell = `<span class="pos">${fmtUsd(potPayout)}</span> <span class="dim" style="font-size:11px">(+${retPct.toFixed(0)}%)</span>`;
+    // Hold time
+    const holdMs = p.opened_ts ? (Date.now() / 1000 - p.opened_ts) : 0;
+    const holdH = holdMs / 3600;
+    const holdStr = holdH < 1
+      ? `${Math.floor(holdMs / 60)}m`
+      : holdH < 24
+        ? `${Math.floor(holdH)}h ${Math.floor(holdMs % 3600 / 60)}m`
+        : `${Math.floor(holdH / 24)}d ${Math.floor(holdH % 24)}h`;
+    // Adverse exit warning: current price < entry * 0.65
+    const adverseWarn = cur != null && cur < entry * 0.65
+      ? ` <span class="warn" title="⚠️ Price near adverse-exit threshold (${(entry * 0.60).toFixed(3)})">⚠️</span>`
+      : "";
+    const holdCell = `${holdStr}${adverseWarn}`;
+    // Row tint based on unrealised P&L
+    const rowStyle = p.unrealized_pnl == null ? ""
+      : p.unrealized_pnl > 0
+        ? `style="background: rgba(74,222,128,0.04)"`
+        : p.unrealized_pnl < 0
+          ? `style="background: rgba(248,113,113,0.04)"`
+          : "";
+    return `<tr ${rowStyle}>
+      <td><span class="chip">${catLabel}</span></td>
+      <td class="market-col">${marketLink}</td>
+      <td>${betDesc}</td>
+      <td class="num">${entry.toFixed(3)}</td>
+      <td class="num">${curPriceStr}</td>
+      <td class="num">${fmtUsd(p.cost_usd)}</td>
+      <td class="num">${payoutCell}</td>
+      <td class="num">${unreal}</td>
+      <td class="num">${pnlPctStr}</td>
+      <td>${resolves}</td>
+      <td class="num">×${p.signal_strength || 1}</td>
+      <td class="dim">${holdCell}</td>
+    </tr>`;
+  }).join("");
+  $("positions").innerHTML = rows || `<tr><td colspan="11" class="dim" style="text-align:center;padding:16px">
+    No open positions yet — waiting for next signal.</td></tr>`;
+}
+
+// ---- closed positions table ----
+let closedStatus = "all_closed";
+let closedResult = "all";
+async function loadClosedPositions() {
+  const r = await fetch(`/api/positions?status=${closedStatus}&result=${closedResult}&limit=100`).then(r => r.json());
+  const positions = r.positions || [];
+
+  // Update count badge
+  const countEl = $("closed-count");
+  if (countEl) countEl.textContent = positions.length ? `${positions.length} trades` : "";
+
+  const catEmoji2 = {sports:"⚽",crypto:"₿",politics:"🏛",culture:"🎬",other:"📌"};
+
+  const rows = positions.map(p => {
+    const won    = p.pnl_usd > 0;
+    const exited = p.status === "exited";
+    const pnlCls = won ? "pos" : p.pnl_usd < 0 ? "neg" : "dim";
+
+    // Result cell
+    let resultCell;
+    if (exited)    resultCell = `<span class="warn">⚠️ Exited</span>`;
+    else if (won)  resultCell = `<span class="pos">✅ Won</span>`;
+    else           resultCell = `<span class="neg">❌ Lost</span>`;
+
+    // Market link
+    const title = p.market_title || p.market.slice(0, 20) + "…";
+    const slug  = p.market_slug || "";
+    const short = title.length > 22 ? title.slice(0, 22) + "…" : title;
+    const marketLink = slug
+      ? `<a href="https://polymarket.com/market/${slug}" target="_blank" title="${title}" style="color:var(--accent);text-decoration:none">${short}</a>`
+      : `<span title="${title}">${short}</span>`;
+
+    // Close price with direction arrow
+    const entry = Number(p.entry_price || 0);
+    const close = Number(p.close_price || 0);
+    const closeArrow = close > entry ? `<span class="pos">↑</span>` : close < entry ? `<span class="neg">↓</span>` : "";
+    const closeStr = `${closeArrow}${close.toFixed(3)}`;
+
+    // Return %
+    const retPct = p.cost_usd > 0 ? (p.pnl_usd / p.cost_usd * 100) : 0;
+    const retStr = `<span class="${pnlCls}">${retPct >= 0 ? "+" : ""}${retPct.toFixed(1)}%</span>`;
+
+    // Hold time
+    const holdH = p.opened_ts && p.closed_ts ? (p.closed_ts - p.opened_ts) / 3600 : 0;
+    const holdStr = holdH < 1
+      ? `${Math.round(holdH * 60)}m`
+      : holdH < 24 ? `${holdH.toFixed(1)}h`
+      : `${Math.floor(holdH / 24)}d`;
+
+    // Category + conviction
+    const cat  = p.category || "other";
+    const catIcon = catEmoji2[cat] || "📌";
+    const conv = p.sig_strength || p.conviction_count || "—";
+
+    // Row tint
+    const rowStyle = won ? `style="background:rgba(74,222,128,0.03)"` : exited ? `style="background:rgba(251,191,36,0.03)"` : p.pnl_usd < 0 ? `style="background:rgba(248,113,113,0.03)"` : "";
+
+    return `<tr ${rowStyle}>
+      <td class="dim" style="font-size:11px">${fmtRelTime(p.closed_ts)}</td>
+      <td class="market-col">${marketLink}</td>
+      <td>${resultCell}</td>
+      <td class="num">${entry.toFixed(3)}</td>
+      <td class="num">${closeStr}</td>
+      <td class="num">${fmtUsd(p.cost_usd)}</td>
+      <td class="num ${pnlCls}">${p.pnl_usd >= 0 ? "+" : ""}${fmtUsd(p.pnl_usd)}</td>
+      <td class="num">${retStr}</td>
+      <td class="dim">${holdStr}</td>
+      <td class="num" title="${cat}">${catIcon}</td>
+      <td class="num dim">×${conv}</td>
+    </tr>`;
+  }).join("");
+
+  $("closed-positions").innerHTML = rows || `<tr><td colspan="11" class="dim" style="text-align:center;padding:16px">
+    No positions match this filter yet.</td></tr>`;
+}
+document.querySelectorAll(".closed-filter").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".closed-filter").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    closedStatus = btn.dataset.status;
+    closedResult = btn.dataset.result;
+    loadClosedPositions();
+  });
+});
+
+// ---- analytics ----
+async function loadAnalytics() {
+  const r = await fetch("/api/analytics").then(r => r.json());
+  const catEmoji3 = {sports:"⚽",crypto:"₿",politics:"🏛",culture:"🎬",other:"📌"};
+
+  // ---- KPI summary cards ----
+  const kpis = [
+    { label:"Win Rate",      value: r.win_rate + "%",                          cls: r.win_rate >= 50 ? "pos" : "neg",
+      tip: `${r.won}W / ${r.lost}L from resolved trades` },
+    { label:"Net PnL",       value: (r.net_pnl >= 0 ? "+" : "") + fmtUsd(r.net_pnl), cls: r.net_pnl >= 0 ? "pos" : "neg",
+      tip: "Total PnL including adverse exits" },
+    { label:"Profit Factor", value: r.profit_factor + "×",                    cls: r.profit_factor >= 1 ? "pos" : "neg",
+      tip: "Gross wins ÷ gross losses. >1 = profitable overall" },
+    { label:"Avg Win",       value: "+" + fmtUsd(r.avg_win),                  cls: "pos",
+      tip: `Avg return on winning trades: +${r.avg_win_pct}%` },
+    { label:"Avg Loss",      value: fmtUsd(r.avg_loss),                       cls: "neg",
+      tip: `Avg return on losing trades: ${r.avg_loss_pct}%` },
+    { label:"Best Trade",    value: "+" + fmtUsd(r.best_trade),               cls: "pos",
+      tip: "Single best trade PnL" },
+    { label:"Worst Trade",   value: fmtUsd(r.worst_trade),                    cls: "neg",
+      tip: "Single worst trade PnL" },
+    { label:"Avg Hold",      value: r.avg_hold_h + "h",                       cls: "",
+      tip: "Average time held per position (closed + exited)" },
+  ];
+  $("analytics-kpis").innerHTML = kpis.map(k => `
+    <div class="kpi" style="padding:10px 12px">
+      <div class="label-wrap"><span class="label">${k.label}</span></div>
+      <div class="value ${k.cls}" style="font-size:16px" title="${k.tip}">${k.value}</div>
+    </div>`).join("");
+
+  // ---- helper: render a breakdown table ----
+  function breakdownRows(data, labelFn) {
+    return data.map(d => {
+      const wr = d.n > 0 ? Math.round(d.wins / d.n * 100) : 0;
+      const wrCls = wr >= 55 ? "pos" : wr >= 45 ? "warn" : "neg";
+      const pCls  = d.pnl >= 0 ? "pos" : "neg";
+      return `<tr>
+        <td>${labelFn(d)}</td>
+        <td class="num dim">${d.n}</td>
+        <td class="num ${wrCls}">${wr}%</td>
+        <td class="num ${pCls}">${d.pnl >= 0 ? "+" : ""}${fmtUsd(d.pnl)}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="4" class="dim">No data</td></tr>`;
+  }
+
+  $("analytics-category").innerHTML = breakdownRows(r.by_category,
+    d => `${catEmoji3[d.cat] || "📌"} ${d.cat}`);
+
+  $("analytics-strength").innerHTML = breakdownRows(r.by_strength,
+    d => `<span title="${d.n < 10 ? 'small sample' : ''}">×${d.signal_strength || 1}${d.n < 10 ? " ⚠️" : ""}</span>`);
+
+  $("analytics-hold").innerHTML = breakdownRows(r.by_hold,
+    d => `<span title="Avg return: ${d.avg_ret_pct}%">${d.bucket}</span>`);
+
+  $("analytics-entry").innerHTML = breakdownRows(r.by_entry,
+    d => d.bucket);
+
+  // ---- Trade Journal ----
+  const journalRows = (r.journal || []).map(j => {
+    const isWin    = j.pnl_usd > 0;
+    const isExited = j.status === "exited";
+    const pnlCls   = isWin ? "pos" : "neg";
+
+    let resultCell;
+    if (isExited)   resultCell = `<span class="warn">⚠️ Exit</span>`;
+    else if (isWin) resultCell = `<span class="pos">✅ Won</span>`;
+    else            resultCell = `<span class="neg">❌ Lost</span>`;
+
+    const title = j.market_title || "—";
+    const slug  = j.market_slug  || "";
+    const short = title.length > 25 ? title.slice(0,25)+"…" : title;
+    const mktLink = slug
+      ? `<a href="https://polymarket.com/market/${slug}" target="_blank" title="${title}" style="color:var(--accent);text-decoration:none">${short}</a>`
+      : `<span title="${title}">${short}</span>`;
+
+    const entry = Number(j.entry_price || 0);
+    const close = Number(j.close_price || 0);
+    const closeArrow = close > entry ? `<span class="pos">↑</span>` : close < entry ? `<span class="neg">↓</span>` : "";
+
+    const retPct = j.cost_usd > 0 ? (j.pnl_usd / j.cost_usd * 100) : 0;
+    const retStr = `<span class="${pnlCls}">${retPct >= 0 ? "+" : ""}${retPct.toFixed(1)}%</span>`;
+
+    const holdH = j.opened_ts && j.closed_ts ? (j.closed_ts - j.opened_ts) / 3600 : 0;
+    const holdStr = holdH < 1 ? `${Math.round(holdH*60)}m`
+                  : holdH < 24 ? `${holdH.toFixed(1)}h`
+                  : `${Math.floor(holdH/24)}d`;
+
+    const cat  = j.category || "other";
+    const conv = j.signal_strength || j.conviction_count || "—";
+
+    return `<tr>
+      <td class="dim" style="font-size:11px">${fmtRelTime(j.closed_ts)}</td>
+      <td class="market-col">${mktLink}</td>
+      <td>${resultCell}</td>
+      <td class="num">${entry.toFixed(3)}</td>
+      <td class="num">${closeArrow}${close.toFixed(3)}</td>
+      <td class="num ${pnlCls}">${j.pnl_usd >= 0 ? "+" : ""}${fmtUsd(j.pnl_usd)}</td>
+      <td class="num">${retStr}</td>
+      <td class="dim">${holdStr}</td>
+      <td class="num" title="${cat}">${catEmoji3[cat] || "📌"}</td>
+      <td class="num dim">×${conv}</td>
+    </tr>`;
+  }).join("");
+  $("analytics-journal").innerHTML = journalRows || `<tr><td colspan="10" class="dim" style="text-align:center;padding:16px">No trades yet</td></tr>`;
+}
+
+// ---- bankroll chart ----
+let pnlChart = null;
+function getCss(v) {
+  return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+}
+async function drawBankroll() {
+  const r = await fetch("/api/pnl").then(r => r.json());
+  const series = r.series;
+  if (!series || !series.length) return;
+
+  const labels   = series.map(p => new Date(p.ts * 1000).toLocaleString([], {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+  }));
+  const equity   = series.map(p => p.equity);
+  const cash     = series.map(p => p.cash);
+  const exposure = series.map(p => p.exposure);
+
+  const ctx      = $("pnlChart").getContext("2d");
+  const accent   = getCss("--accent");   // teal  — Equity
+  const warn     = getCss("--warn");     // amber — Cash
+  const textDim  = getCss("--text-dim");
+  const border   = getCss("--border");
+  const purple   = "#818cf8";            // soft purple — Exposure
+
+  // Gradient fill under equity line
+  const grad = ctx.createLinearGradient(0, 0, 0, 220);
+  grad.addColorStop(0, accent + "44");
+  grad.addColorStop(1, accent + "00");
+
+  // Dynamic Y axis range
+  const allVals = [...equity, ...cash];
+  const yMin = Math.floor(Math.min(...allVals) * 0.995 / 100) * 100;
+  const yMax = Math.ceil( Math.max(...allVals) * 1.005 / 100) * 100;
+
+  if (pnlChart) pnlChart.destroy();
+  pnlChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Equity",   data: equity,   borderColor: accent,  backgroundColor: grad,
+          fill: true,  tension: 0.2, pointRadius: 0, borderWidth: 2 },
+        { label: "Cash",     data: cash,     borderColor: warn,    backgroundColor: "transparent",
+          fill: false, tension: 0.2, pointRadius: 0, borderWidth: 1.5, borderDash: [5, 3] },
+        { label: "Exposure", data: exposure, borderColor: purple,  backgroundColor: "transparent",
+          fill: false, tension: 0.2, pointRadius: 0, borderWidth: 1,   borderDash: [2, 4] },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: textDim, boxWidth: 12, padding: 14 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: textDim, maxTicksLimit: 8 }, grid: { color: border } },
+        y: { ticks: { color: textDim, callback: v => "$" + v.toLocaleString() },
+             grid: { color: border }, min: yMin, max: yMax }
+      }
+    }
+  });
+}
+
+// ---- daily P&L bar chart ----
+let dailyChart = null;
+async function drawDailyChart() {
+  const r = await fetch("/api/daily_pnl").then(r => r.json());
+  const daily = r.daily || [];
+  if (!daily.length) return;
+
+  const labels  = daily.map(d => d.day ? d.day.slice(5) : "");
+  const pnls    = daily.map(d => d.pnl);
+  const colors  = pnls.map(v => v >= 0 ? getCss("--pos") + "cc" : getCss("--neg") + "cc");
+  const textDim = getCss("--text-dim");
+  const border  = getCss("--border");
+  const accent  = getCss("--accent");
+
+  // Cumulative P&L line
+  let running = 0;
+  const cumulative = pnls.map(v => { running += v; return Math.round(running * 100) / 100; });
+
+  const ctx = $("dailyChart").getContext("2d");
+  if (dailyChart) dailyChart.destroy();
+  dailyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { type: "bar",  label: "Daily P&L",      data: pnls,       backgroundColor: colors, borderRadius: 3, yAxisID: "y" },
+        { type: "line", label: "Cumulative P&L",  data: cumulative, borderColor: accent,
+          backgroundColor: "transparent", tension: 0.3, pointRadius: 0,
+          borderWidth: 2, yAxisID: "y2" },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: textDim, boxWidth: 12, padding: 14 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              return ` ${ctx.dataset.label}: ${v >= 0 ? "+" : ""}$${v.toFixed(2)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x:  { ticks: { color: textDim, maxTicksLimit: 14 }, grid: { color: border } },
+        y:  { ticks: { color: textDim, callback: v => (v >= 0 ? "+$" : "-$") + Math.abs(v) },
+              grid: { color: border }, position: "left" },
+        y2: { ticks: { color: accent,  callback: v => "$" + v.toLocaleString() },
+              grid: { display: false }, position: "right" }
+      }
+    }
+  });
+}
+
+
+// ---- filter state ----
+let activeFilters = {
+  category: [],
+  result: ["won", "lost", "exited"],  // Default: show all results
+  "leader-tier": [],
+  duration: [],
+  period: "day",
+};
+
+function updateAllFilterButtonStates() {
+  // Update time-filter buttons
+  document.querySelectorAll(".time-filter").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.period === activeFilters.period);
+  });
+
+  // Update filter-toggle buttons
+  document.querySelectorAll(".filter-toggle").forEach(btn => {
+    const type = btn.dataset.filterType;
+    const value = btn.dataset.filterValue;
+    btn.classList.toggle("active", activeFilters[type].includes(value));
+  });
+}
+
+function renderActiveFilters() {
+  const container = $("active-filter-pills");
+  const pills = [];
+
+  // Only add non-time-period filters to pills
+  // Time period is controlled by buttons at the top only
+  Object.entries(activeFilters).forEach(([type, values]) => {
+    if (type === "period") return; // Don't show time period in pills
+    if (Array.isArray(values)) {
+      // Special handling for result filters: only show if not all selected
+      if (type === "result") {
+        const allResults = ["won", "lost", "exited"];
+        const isAllSelected = allResults.every(r => values.includes(r));
+        if (!isAllSelected) {
+          // Show only the selected result filters
+          values.forEach(v => {
+            const label = v.charAt(0).toUpperCase() + v.slice(1);
+            pills.push({ type, value: v, label });
+          });
+        }
+      } else {
+        // Other filters: show all selected ones
+        values.forEach(v => {
+          const label = v.charAt(0).toUpperCase() + v.slice(1).replace(/([A-Z])/g, " $1");
+          pills.push({ type, value: v, label });
+        });
+      }
+    }
+  });
+
+  // Build the display content
+  let html = '';
+
+  // Show current time period as a label
+  if (activeFilters.period) {
+    const periodLabel = activeFilters.period.charAt(0).toUpperCase() + activeFilters.period.slice(1);
+    html += `<span style="display: inline-block; padding: 4px 8px; background: var(--panel-2); border-radius: 4px; font-size: 11px; color: var(--text-dim); margin-right: 6px;">Time: <b style="color: var(--accent);">${periodLabel}</b></span>`;
+  }
+
+  // Add other filter pills
+  if (pills.length === 0 && !html) {
+    html = '<span style="color: var(--text-dim); font-size: 10px;">None selected</span>';
+    $("clear-all-filters").style.display = "none";
+  } else {
+    if (pills.length > 0) {
+      html += pills.map(p =>
+        `<div class="filter-pill" data-type="${p.type}" data-value="${p.value}">
+          ${p.label} <span class="remove">✕</span>
+        </div>`
+      ).join("");
+    }
+    if (pills.length > 0) {
+      $("clear-all-filters").style.display = "inline-block";
+    } else {
+      $("clear-all-filters").style.display = "none";
+    }
+  }
+
+  container.innerHTML = html;
+
+  document.querySelectorAll(".filter-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const type = pill.dataset.type;
+      const value = pill.dataset.value;
+      activeFilters[type] = activeFilters[type].filter(v => v !== value);
+      updateAllFilterButtonStates();
+      updateKPIs();
+    });
+  });
+}
+
+// ---- time filter buttons ----
+document.querySelectorAll(".time-filter").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const period = btn.dataset.period;
+    activeFilters.period = period;
+    currentTimePeriod = period;
+    updateAllFilterButtonStates();
+    updateKPIs();
+  });
+});
+
+// ---- filter toggle buttons ----
+document.querySelectorAll(".filter-toggle").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const type = btn.dataset.filterType;
+    const value = btn.dataset.filterValue;
+
+    if (activeFilters[type].includes(value)) {
+      activeFilters[type] = activeFilters[type].filter(v => v !== value);
+    } else {
+      activeFilters[type].push(value);
+    }
+    updateAllFilterButtonStates();
+    updateKPIs();
+  });
+});
+
+// ---- clear all filters ----
+$("clear-all-filters").addEventListener("click", () => {
+  // Clear multi-select filters (except result defaults to all)
+  activeFilters.category = [];
+  activeFilters.result = ["won", "lost", "exited"];  // Reset to default (show all results)
+  activeFilters["leader-tier"] = [];
+  activeFilters.duration = [];
+  updateAllFilterButtonStates();
+  updateKPIs();
+});
+
+// ---- Global tooltip (fixed-position, never clipped by overflow containers) ----
+(function initGlobalTip() {
+  const el = document.createElement('div');
+  el.id = 'global-tip';
+  document.body.appendChild(el);
+
+  let hideTimer = null;
+
+  function show(icon) {
+    const box = icon.nextElementSibling;
+    if (!box || !box.classList.contains('tip-box')) return;
+    el.innerHTML = box.innerHTML;
+
+    const r = icon.getBoundingClientRect();
+    const tipW = 280, gap = 8;
+
+    // Vertical: prefer below icon, flip above if not enough space
+    let top = r.bottom + gap;
+    if (top + 120 > window.innerHeight) top = r.top - gap - 120;
+
+    // Horizontal: centre on icon, clamp to viewport
+    let left = r.left + r.width / 2 - tipW / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
+
+    el.style.top  = top + 'px';
+    el.style.left = left + 'px';
+    el.style.width = tipW + 'px';
+    el.style.opacity = '1';
+  }
+
+  function hide() {
+    el.style.opacity = '0';
+  }
+
+  document.addEventListener('mouseover', e => {
+    const icon = e.target.closest('.tip-icon');
+    if (icon) { clearTimeout(hideTimer); show(icon); }
+  });
+  document.addEventListener('mouseout', e => {
+    const icon = e.target.closest('.tip-icon');
+    if (icon) hideTimer = setTimeout(hide, 80);
+  });
+})();
+
+// ---- boot & refresh ----
+(async function boot() {
+  // Fire all independent loads in parallel — cuts page load from ~8s sequential to ~3s parallel
+  await Promise.all([
+    loadStats(),
+    loadLeaders().then(() => initLeaderSort()),  // sort handlers need the DOM rows first
+    loadSignals(),
+    loadPositions(),
+    loadClosedPositions(),
+    loadAnalytics(),
+    drawBankroll(),
+    drawDailyChart(),
+  ]);
+  connectSSE();
+  setInterval(loadStats, 10_000);
+  setInterval(loadLeaders, 60_000);
+  setInterval(loadPositions, 60_000);   // live_positions hits CLOB — don't hammer it
+  setInterval(loadClosedPositions, 30_000);
+  setInterval(loadAnalytics, 30_000);
+  setInterval(drawBankroll, 30_000);
+  setInterval(drawDailyChart, 60_000);
+})();
+</script>
+</body>
+</html>

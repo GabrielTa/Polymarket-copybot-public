@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Latency & Slippage Decay — Polymarket Copy Bot</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--panel-2:#21262d;--border:#30363d;--text:#e6edf3;--text-dim:#8b949e;--accent:#2dd4bf;--pos:#3fb950;--neg:#f85149;--amber:#d29922;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 20px 60px;}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;} h1{font-size:22px;margin:0;} .sub{color:var(--text-dim);font-size:13px;}
+  .nav{margin:8px 0 20px;} .nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--border);padding:5px 11px;border-radius:6px;} .nav a:hover{background:var(--panel-2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;color:var(--text-dim);font-size:12.5px;margin-bottom:18px;line-height:1.5;}
+  .verdict{font-size:13px;padding:12px 16px;border-radius:6px;background:var(--panel-2);margin-bottom:22px;line-height:1.55;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:22px;overflow:hidden;} .panel h2{font-size:14px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);} .panel h2 small{color:var(--text-dim);font-weight:400;font-size:12px;}
+  table{width:100%;border-collapse:collapse;} th,td{text-align:left;padding:10px 16px;font-size:13px;white-space:nowrap;} th{color:var(--text-dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);} td{border-bottom:1px solid var(--border);} tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;} .pos{color:var(--pos);} .neg{color:var(--neg);} .dim{color:var(--text-dim);}
+  .roibar{position:relative;height:20px;background:transparent;width:180px;display:inline-block;vertical-align:middle;}
+  .roibar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--border);}
+  .roibar .fill{position:absolute;top:4px;height:12px;border-radius:2px;}
+  .updated{color:var(--text-dim);font-size:11px;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>⏱️ Latency &amp; Slippage Decay</h1><span class="sub">Is the copy edge perishable?</span></header>
+  <div class="nav"><a href="/">← Main dashboard</a> &nbsp; <a href="/shadow">Shadow →</a> &nbsp; <a href="/hybrid">Hybrid →</a></div>
+
+  <div class="note">
+    <b>📖 In plain terms:</b> when a leader bets, we copy them — but a bit <i>later</i> and sometimes at a slightly <i>worse
+    price</i>. The theory: the more time passes (<b>latency</b>) or the more the price moves against us before we fill
+    (<b>slippage</b>), the more the edge is already gone. This page tests that on real copied bets by grouping their actual
+    win/loss by how stale the signal was and how far the price moved. <b>Green ROI = still profitable, red = the edge died.</b>
+    A clear cliff = a mechanical "skip" rule. From data we already store — no fetch.
+  </div>
+
+  <div class="verdict" id="verdict">Loading…</div>
+
+  <div class="panel">
+    <h2>By Latency <small>— time between the leader's trade and when we saw it</small></h2>
+    <table>
+      <thead><tr><th>Latency</th><th class="num">Bets</th><th class="num">Win rate</th><th class="num">ROI</th><th>ROI (visual)</th></tr></thead>
+      <tbody id="t-lat"></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>By Slippage <small>— our fill price vs the leader's price (positive = we paid worse)</small></h2>
+    <table>
+      <thead><tr><th>Slippage</th><th class="num">Bets</th><th class="num">Win rate</th><th class="num">ROI</th><th>ROI (visual)</th></tr></thead>
+      <tbody id="t-slip"></tbody>
+    </table>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+<script>
+function cls(v){return v>0?'pos':(v<0?'neg':'dim');}
+function roibar(roi){
+  const cap=15, w=Math.min(Math.abs(roi),cap)/cap*90; // half-width %
+  const color=roi>=0?'var(--pos)':'var(--neg)';
+  const style=roi>=0?`left:50%;width:${w}%;background:${color}`:`right:50%;width:${w}%;background:${color}`;
+  return `<div class="roibar"><div class="mid"></div><div class="fill" style="${style}"></div></div>`;
+}
+function rows(arr){
+  return arr.map(b=>`<tr>
+    <td>${b.band}</td>
+    <td class="num">${b.n}</td>
+    <td class="num">${b.n?b.win_rate+'%':'—'}</td>
+    <td class="num ${cls(b.roi_pct)}">${b.n?(b.roi_pct>=0?'+':'')+b.roi_pct+'%':'—'}</td>
+    <td>${b.n?roibar(b.roi_pct):''}</td>
+  </tr>`).join('');
+}
+async function load(){
+  try{
+    const d=await(await fetch('/api/latency_decay')).json();
+    document.getElementById('t-lat').innerHTML=rows(d.by_latency);
+    document.getElementById('t-slip').innerHTML=rows(d.by_slippage);
+    // build an honest verdict from the data
+    const lat=d.by_latency.filter(b=>b.n>=10);
+    const fast=lat.filter(b=>['<30s','30–60s'].includes(b.band));
+    const slow=lat.filter(b=>['1–2m','2–5m'].includes(b.band));
+    const fastRoi=fast.reduce((s,b)=>s+b.roi_pct*b.n,0)/(fast.reduce((s,b)=>s+b.n,0)||1);
+    const slowRoi=slow.reduce((s,b)=>s+b.roi_pct*b.n,0)/(slow.reduce((s,b)=>s+b.n,0)||1);
+    const adverse=d.by_slippage.filter(b=>['1–2¢','2¢+ (adverse)'].includes(b.band));
+    const advRoi=adverse.reduce((s,b)=>s+b.roi_pct*b.n,0)/(adverse.reduce((s,b)=>s+b.n,0)||1);
+    let v=`Across <b>${d.overall.n}</b> resolved copied bets (overall ROI ${d.overall.roi_pct}%). `;
+    v+=`<b>Latency:</b> fast copies (&lt;1m) ran <b class="${cls(fastRoi)}">${fastRoi.toFixed(1)}%</b> ROI vs slower (1–5m) at <b class="${cls(slowRoi)}">${slowRoi.toFixed(1)}%</b> — `;
+    v+= fastRoi<slowRoi ? `so the "copy faster" theory is <span class="neg">refuted</span> here; a "skip if slow" filter would HURT. ` : `faster is better, as expected. `;
+    v+=`<b>Slippage:</b> bets filled ≥1¢ worse than the leader ran <b class="${cls(advRoi)}">${advRoi.toFixed(1)}%</b> ROI — `;
+    v+= advRoi<0 ? `a real cliff: paying &gt;1¢ over the leader kills the edge, so "skip if slippage &gt;1¢" is worth testing.` : `no clear slippage cliff.`;
+    document.getElementById('verdict').innerHTML=v;
+    document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+d.note;
+  }catch(e){document.getElementById('updated').textContent='Error: '+e;}
+}
+load(); setInterval(load,60000);
+</script>
+</body>
+</html>

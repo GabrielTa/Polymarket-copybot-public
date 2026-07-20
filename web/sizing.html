@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sizing Experiment — Polymarket Copy Bot</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel-2:#21262d; --border:#30363d;
+    --text:#e6edf3; --text-dim:#8b949e; --accent:#2dd4bf;
+    --pos:#3fb950; --neg:#f85149; --amber:#d29922; --flat:#8b949e; --wt:#2dd4bf;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 20px 60px;}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;}
+  h1{font-size:22px;margin:0;}
+  .sub{color:var(--text-dim);font-size:13px;}
+  .nav{margin:8px 0 20px;} .nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--border);padding:5px 11px;border-radius:6px;}
+  .nav a:hover{background:var(--panel-2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;color:var(--text-dim);font-size:12.5px;margin-bottom:20px;line-height:1.5;}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;}
+  .card.flat{border-top:3px solid var(--flat);} .card.wt{border-top:3px solid var(--wt);}
+  .card h3{margin:0 0 12px;font-size:13px;} .card h3 .dot{font-size:16px;}
+  .metric{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .metric:last-child{border-bottom:none;} .metric .k{color:var(--text-dim);} .metric .v{font-variant-numeric:tabular-nums;font-weight:600;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0;margin-bottom:22px;overflow:hidden;}
+  .panel h2{font-size:14px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);} .panel h2 small{color:var(--text-dim);font-weight:400;font-size:12px;}
+  .chartwrap{padding:16px;}
+  table{width:100%;border-collapse:collapse;} th,td{text-align:left;padding:9px 16px;font-size:13px;white-space:nowrap;}
+  th{color:var(--text-dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);}
+  td{border-bottom:1px solid var(--border);} tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;} .pos{color:var(--pos);} .neg{color:var(--neg);} .dim{color:var(--text-dim);}
+  .legend{display:flex;gap:18px;font-size:12px;padding:0 16px 12px;} .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:14px;height:3px;display:inline-block;border-radius:2px;}
+  .verdict{font-size:13px;padding:11px 16px;border-radius:6px;background:var(--panel-2);margin-bottom:22px;line-height:1.5;}
+  .updated{color:var(--text-dim);font-size:11px;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚖️ Sizing Experiment</h1>
+    <span class="sub">Conviction-weighted sizing vs your real flat book</span>
+  </header>
+  <div class="nav"><a href="/">← Main dashboard</a> &nbsp; <a href="/shadow">Shadow book →</a></div>
+
+  <div class="note">
+    <b>📖 In plain terms:</b> this page is about <b>how much to bet, not what to bet.</b> It replays the exact same trades
+    the bot already made and asks: <i>"what if we'd staked different amounts?"</i> It compares two ideas against your real
+    book: <b>Flat</b> (same stake every time — what the bot does now) vs <b>Conviction-weighted</b> (bet more when more
+    leaders agree — 1.5× on 5-leader signals, 2× on 6+). A bet's win/loss doesn't depend on its size, so we can test this
+    safely by re-weighting past results. <b>No real bets.</b><br><br>
+    <b>How to read it:</b> the fair scoreboard is <b>ROI</b> (profit per $1 risked), since the two bet different amounts.
+    Higher ROI at similar drawdown = the better way to size.
+  </div>
+
+  <div class="verdict" id="verdict">Loading…</div>
+
+  <div class="cmp">
+    <div class="card flat">
+      <h3><span class="dot" style="color:var(--flat)">●</span> Flat sizing (your real book)</h3>
+      <div class="metric"><span class="k">Total PnL</span><span class="v" id="f-pnl">—</span></div>
+      <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="f-roi">—</span></div>
+      <div class="metric"><span class="k">Max drawdown</span><span class="v" id="f-dd">—</span></div>
+      <div class="metric"><span class="k">Capital deployed</span><span class="v dim" id="f-stake">—</span></div>
+    </div>
+    <div class="card wt">
+      <h3><span class="dot" style="color:var(--wt)">●</span> Conviction-weighted (experiment)</h3>
+      <div class="metric"><span class="k">Total PnL</span><span class="v" id="w-pnl">—</span></div>
+      <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="w-roi">—</span></div>
+      <div class="metric"><span class="k">Max drawdown</span><span class="v" id="w-dd">—</span></div>
+      <div class="metric"><span class="k">Capital deployed</span><span class="v dim" id="w-stake">—</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cumulative PnL <small>— flat vs conviction-weighted</small></h2>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--flat)"></span> Flat (real)</span>
+      <span><span class="swatch" style="background:var(--wt)"></span> Conviction-weighted</span>
+    </div>
+    <div class="chartwrap"><svg id="chart" viewBox="0 0 900 320" width="100%" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </div>
+
+  <div class="panel">
+    <h2>By Conviction <small>— where weighting helps (and where it hurts)</small></h2>
+    <table>
+      <thead><tr><th>Conviction</th><th class="num">Multiplier</th><th class="num">Trades</th><th class="num">Flat PnL</th><th class="num">Weighted PnL</th><th class="num">Δ</th></tr></thead>
+      <tbody id="t-conv"><tr><td colspan="6" class="dim" style="padding:24px;text-align:center">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Friend's Kelly Sizer <small>— walk-forward sim of copybot_sizing_strategy_v2.9 on your real trades</small></h2>
+    <div style="padding:12px 16px;color:var(--text-dim);font-size:12.5px;line-height:1.5;">
+      Wilson lower-bound win rate per price bucket, 2% edge floor, half-Kelly, /C=4. For each historical bet the
+      stake uses only win-rate data that resolved <b>before</b> it (no lookahead). Compared to flat 1% on a $1000 bankroll.
+    </div>
+    <div class="verdict" id="k-verdict" style="margin:0 16px 16px;">Loading…</div>
+    <div class="cmp" style="padding:0 16px 16px;">
+      <div class="card wt">
+        <h3><span class="dot" style="color:var(--wt)">●</span> Friend's Kelly sizer</h3>
+        <div class="metric"><span class="k">Total PnL</span><span class="v" id="k-pnl">—</span></div>
+        <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="k-roi">—</span></div>
+        <div class="metric"><span class="k">Max drawdown</span><span class="v" id="k-dd">—</span></div>
+        <div class="metric"><span class="k">Bets taken / skipped</span><span class="v dim" id="k-bets">—</span></div>
+      </div>
+      <div class="card flat">
+        <h3><span class="dot" style="color:var(--flat)">●</span> Flat 1% baseline</h3>
+        <div class="metric"><span class="k">Total PnL</span><span class="v" id="kf-pnl">—</span></div>
+        <div class="metric"><span class="k">ROI (per $ risked)</span><span class="v" id="kf-roi">—</span></div>
+        <div class="metric"><span class="k">Max drawdown</span><span class="v" id="kf-dd">—</span></div>
+        <div class="metric"><span class="k">Bets taken</span><span class="v dim" id="kf-bets">all</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+
+<script>
+function money(v){return (v>=0?'+$':'-$')+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});}
+function cls(v){return v>0?'pos':(v<0?'neg':'dim');}
+function drawChart(days, flat, wt){
+  const W=900,H=320,pad=44;
+  const all=flat.concat(wt); const lo=Math.min(0,...all), hi=Math.max(0,...all);
+  const x=i=>pad+(W-pad*1.3)*(days.length<2?0.5:i/(days.length-1));
+  const y=v=>H-pad-(H-pad*1.6)*((v-lo)/((hi-lo)||1));
+  const path=arr=>arr.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  const zeroY=y(0);
+  let svg='';
+  svg+=`<line x1="${pad}" y1="${zeroY}" x2="${W-pad*0.3}" y2="${zeroY}" stroke="#30363d" stroke-width="1"/>`;
+  svg+=`<text x="${pad-6}" y="${y(hi)+4}" fill="#8b949e" font-size="11" text-anchor="end">${money(hi)}</text>`;
+  svg+=`<text x="${pad-6}" y="${zeroY+4}" fill="#8b949e" font-size="11" text-anchor="end">$0</text>`;
+  if(lo<0) svg+=`<text x="${pad-6}" y="${y(lo)+4}" fill="#8b949e" font-size="11" text-anchor="end">${money(lo)}</text>`;
+  svg+=`<path d="${path(flat)}" fill="none" stroke="#8b949e" stroke-width="2"/>`;
+  svg+=`<path d="${path(wt)}" fill="none" stroke="#2dd4bf" stroke-width="2.5"/>`;
+  document.getElementById('chart').innerHTML=svg;
+}
+async function load(){
+  try{
+    const d=await(await fetch('/api/sizing_sim')).json();
+    const a=d.actual,w=d.weighted;
+    document.getElementById('f-pnl').innerHTML=`<span class="${cls(a.pnl)}">${money(a.pnl)}</span>`;
+    document.getElementById('f-roi').textContent=a.roi_pct+'%';
+    document.getElementById('f-dd').innerHTML=`<span class="neg">-$${a.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    document.getElementById('f-stake').textContent='$'+a.staked.toLocaleString(undefined,{maximumFractionDigits:0});
+    document.getElementById('w-pnl').innerHTML=`<span class="${cls(w.pnl)}">${money(w.pnl)}</span>`;
+    document.getElementById('w-roi').textContent=w.roi_pct+'%';
+    document.getElementById('w-dd').innerHTML=`<span class="neg">-$${w.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    document.getElementById('w-stake').textContent='$'+w.staked.toLocaleString(undefined,{maximumFractionDigits:0});
+    // verdict
+    const roiBetter=w.roi_pct-a.roi_pct, ddWorse=w.max_drawdown-a.max_drawdown;
+    const better=roiBetter>0;
+    document.getElementById('verdict').innerHTML=
+      `Over <b>${d.trades}</b> resolved trades, conviction-weighting turned <b>${money(a.pnl)}</b> into <b>${money(w.pnl)}</b> `+
+      `— and more importantly, ROI ${better?'<span class="pos">improved</span>':'<span class="neg">fell</span>'} from `+
+      `<b>${a.roi_pct}%</b> to <b>${w.roi_pct}%</b> per $ risked, with max drawdown ${ddWorse>0?'up':'down'} `+
+      `$${Math.abs(ddWorse).toLocaleString(undefined,{maximumFractionDigits:0})}. `+
+      `${better?'It earns more per unit of risk — the effect is real, but this is in-sample.':'It does NOT improve risk-adjusted returns.'}`;
+    drawChart(d.curve.days,d.curve.actual,d.curve.weighted);
+    // table
+    document.getElementById('t-conv').innerHTML=d.by_conviction.map(b=>{
+      const delta=b.weighted_pnl-b.actual_pnl;
+      return `<tr><td>str${b.strength}</td><td class="num">${b.mult}×</td><td class="num">${b.trades}</td>`+
+        `<td class="num ${cls(b.actual_pnl)}">${money(b.actual_pnl)}</td>`+
+        `<td class="num ${cls(b.weighted_pnl)}">${money(b.weighted_pnl)}</td>`+
+        `<td class="num ${cls(delta)}">${delta===0?'—':money(delta)}</td></tr>`;
+    }).join('');
+    document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+d.note;
+  }catch(e){document.getElementById('updated').textContent='Error: '+e;}
+}
+async function loadKelly(){
+  try{
+    const d=await(await fetch('/api/kelly_sim')).json();
+    const k=d.kelly,f=d.flat;
+    document.getElementById('k-pnl').innerHTML=`<span class="${cls(k.pnl)}">${money(k.pnl)}</span>`;
+    document.getElementById('k-roi').innerHTML=`<span class="${cls(k.roi_pct)}">${k.roi_pct}%</span>`;
+    document.getElementById('k-dd').innerHTML=`<span class="neg">-$${k.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    document.getElementById('k-bets').textContent=`${k.bets_taken} / ${k.bets_skipped}`;
+    document.getElementById('kf-pnl').innerHTML=`<span class="${cls(f.pnl)}">${money(f.pnl)}</span>`;
+    document.getElementById('kf-roi').innerHTML=`<span class="${cls(f.roi_pct)}">${f.roi_pct}%</span>`;
+    document.getElementById('kf-dd').innerHTML=`<span class="neg">-$${f.max_drawdown.toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+    const winner=k.roi_pct>f.roi_pct;
+    document.getElementById('k-verdict').innerHTML=
+      `On ${d.resolved} real trades, the Kelly sizer took only <b>${k.bets_taken}</b> bets (skipped <b>${k.bets_skipped}</b>, ${(100*k.bets_skipped/d.resolved).toFixed(0)}%) `+
+      `and returned <b class="${cls(k.pnl)}">${money(k.pnl)}</b> (<b>${k.roi_pct}%</b> ROI) vs flat 1% at <b>${f.roi_pct}%</b>. `+
+      `${winner?'The Kelly sizer won on risk-adjusted return.':'The Kelly sizer <span class="neg">underperformed</span> — its edge floor forced it into the low-price band your data shows is unprofitable.'}`;
+  }catch(e){}
+}
+load(); loadKelly(); setInterval(()=>{load();loadKelly();},60000);
+</script>
+</body>
+</html>

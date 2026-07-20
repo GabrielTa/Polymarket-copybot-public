@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLV — Closing Line Value</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--panel-2:#21262d;--border:#30363d;--text:#e6edf3;--text-dim:#8b949e;--accent:#2dd4bf;--pos:#3fb950;--neg:#f85149;--amber:#d29922;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:24px 20px 60px;}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;} h1{font-size:22px;margin:0;} .sub{color:var(--text-dim);font-size:13px;}
+  .nav{margin:8px 0 20px;} .nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--border);padding:5px 11px;border-radius:6px;} .nav a:hover{background:var(--panel-2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;color:var(--text-dim);font-size:12.5px;margin-bottom:18px;line-height:1.5;}
+  .warn{border-left-color:var(--amber);}
+  .verdict{font-size:13px;padding:12px 16px;border-radius:6px;background:var(--panel-2);margin-bottom:22px;line-height:1.55;}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px;}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;} .kpi .label{color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:.04em;} .kpi .value{font-size:22px;font-weight:600;margin-top:4px;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:22px;overflow:hidden;} .panel h2{font-size:14px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);} .panel h2 small{color:var(--text-dim);font-weight:400;font-size:12px;}
+  table{width:100%;border-collapse:collapse;} th,td{text-align:left;padding:9px 16px;font-size:13px;white-space:nowrap;} th{color:var(--text-dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);} td{border-bottom:1px solid var(--border);} tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;} .pos{color:var(--pos);} .neg{color:var(--neg);} .dim{color:var(--text-dim);}
+  .pill{font-size:11px;padding:2px 8px;border-radius:10px;} .pill.skilled{background:rgba(63,185,80,.15);color:var(--pos);} .pill.harmful{background:rgba(248,81,73,.15);color:var(--neg);}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .updated{color:var(--text-dim);font-size:11px;margin-top:10px;}
+  code{background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>🎯 Closing Line Value (CLV)</h1><span class="sub">Skill vs luck — the pro metric</span></header>
+  <div class="nav"><a href="/">← Main dashboard</a> &nbsp; <a href="/latency">Latency →</a> &nbsp; <a href="/shadow">Shadow →</a></div>
+
+  <div class="note">
+    <b>📖 In plain terms:</b> when we buy at a price, did the market later move <i>toward</i> us before the game (we got a
+    good price = <b>skill</b>) or <i>away</i> from us (we bought the top = <b>exit liquidity</b>)? That's CLV. Unlike win/loss
+    — which is mostly luck at these odds — CLV shows real skill in <b>dozens</b> of bets, not hundreds. We measure it against
+    the price <b>just before the event</b> (never the win/lose resolution). Applied to <b>leaders</b>, it separates who
+    actually moves markets from who just got lucky.
+  </div>
+  <div class="note warn">
+    ⚠️ <b>Verify before trusting:</b> a wrong "close" price would poison every number here. Hand-check the sample rows at the
+    bottom against the Polymarket price chart before acting on any verdict. Closes that already hit 0/1 are auto-excluded.
+  </div>
+
+  <div id="notready" class="verdict" style="display:none">Loading… (CLV backfill may still be running — this can take a few minutes.)</div>
+
+  <div id="content" style="display:none">
+    <div class="verdict" id="verdict"></div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="label">Avg CLV</div><div class="value" id="k-avg">—</div></div>
+      <div class="kpi"><div class="label">% Positive CLV</div><div class="value" id="k-pct">—</div></div>
+      <div class="kpi"><div class="label">Scored (reliable)</div><div class="value dim" id="k-n">—</div></div>
+      <div class="kpi"><div class="label">Skilled leaders</div><div class="value" id="k-skill">—</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Does CLV predict OUR results? <small>— sanity check that the metric is meaningful here</small></h2>
+      <table>
+        <thead><tr><th>Bets grouped by CLV</th><th class="num">Avg PnL / bet</th></tr></thead>
+        <tbody id="t-predict"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>CLV by Conviction Tier <small>— out-of-sample check on the 1.5×/2× multipliers</small></h2>
+      <table>
+        <thead><tr><th>Tier</th><th class="num">Bets</th><th class="num">Avg CLV</th></tr></thead>
+        <tbody id="t-conv"></tbody>
+      </table>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h2>🟢 Most Skilled Leaders <small>— price moves toward us</small></h2>
+        <table>
+          <thead><tr><th>Leader</th><th class="num">Bets</th><th class="num">Avg CLV</th></tr></thead>
+          <tbody id="t-skilled"></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>🔴 Harmful Leaders <small>— we're their exit liquidity</small></h2>
+        <table>
+          <thead><tr><th>Leader</th><th class="num">Bets</th><th class="num">Avg CLV</th></tr></thead>
+          <tbody id="t-harmful"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🔎 Verify these against the Polymarket chart <small>— mandatory before trusting the numbers</small></h2>
+      <table>
+        <thead><tr><th>Pos</th><th>Market</th><th class="num">Our entry</th><th class="num">Close</th><th class="num">CLV</th></tr></thead>
+        <tbody id="t-verify"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+<script>
+function c2(v){return (v>=0?'+':'')+v.toFixed(2)+'¢';}
+function cls(v){return v>0?'pos':(v<0?'neg':'dim');}
+async function load(){
+  try{
+    const d=await(await fetch('/api/clv')).json();
+    if(!d.ready){
+      document.getElementById('notready').style.display='block';
+      document.getElementById('notready').innerHTML='CLV backfill in progress… '+(d.scored?('scored '+d.scored+' so far'):'')+'. Refreshing.';
+      document.getElementById('updated').textContent=d.note||'';
+      return;
+    }
+    document.getElementById('notready').style.display='none';
+    document.getElementById('content').style.display='block';
+    const o=d.overall;
+    document.getElementById('k-avg').innerHTML='<span class="'+cls(o.avg_clv_cents)+'">'+c2(o.avg_clv_cents)+'</span>';
+    document.getElementById('k-pct').textContent=o.pct_positive+'%';
+    document.getElementById('k-n').textContent=d.reliable+' ('+d.flagged+' excluded)';
+    document.getElementById('k-skill').innerHTML='<span class="pos">'+d.leader_counts.skilled+'</span> / <span class="neg">'+d.leader_counts.harmful+'</span> harmful';
+    // verdict
+    const good=o.avg_clv_cents>0;
+    document.getElementById('verdict').innerHTML=
+      'Across <b>'+d.reliable+'</b> reliably-priced bets, average CLV is <b class="'+cls(o.avg_clv_cents)+'">'+c2(o.avg_clv_cents)+'</b> '+
+      '('+o.pct_positive+'% of bets had the market move toward us). '+
+      (good? 'Positive average CLV = we tend to get <b>good prices</b>, real evidence of edge beyond win/loss.'
+           : 'Negative average CLV means we tend to be <b class="neg">exit liquidity</b> — buying after the smart money already moved the price. That is a warning the copy edge may be thinner than win/loss suggests.');
+    // predicts
+    const p=d.clv_predicts_pnl;
+    document.getElementById('t-predict').innerHTML=
+      '<tr><td>🟢 Positive CLV (good price)</td><td class="num '+cls(p.pos_clv_avg_pnl)+'">$'+p.pos_clv_avg_pnl.toFixed(2)+'</td></tr>'+
+      '<tr><td>🔴 Negative CLV (bad price)</td><td class="num '+cls(p.neg_clv_avg_pnl)+'">$'+p.neg_clv_avg_pnl.toFixed(2)+'</td></tr>';
+    document.getElementById('t-conv').innerHTML=d.by_conviction.map(b=>
+      '<tr><td>'+b.tier+'</td><td class="num">'+b.n+'</td><td class="num '+cls(b.avg_clv_cents)+'">'+c2(b.avg_clv_cents)+'</td></tr>').join('');
+    document.getElementById('t-skilled').innerHTML=(d.leaders_skilled.length?d.leaders_skilled:[]).map(l=>
+      '<tr><td><code>'+l.wallet+'</code> <span class="pill skilled">SKILLED</span></td><td class="num">'+l.n+'</td><td class="num pos">'+c2(l.avg_clv_cents)+'</td></tr>').join('')||'<tr><td colspan="3" class="dim" style="padding:18px">None clear the bar yet</td></tr>';
+    document.getElementById('t-harmful').innerHTML=(d.leaders_harmful.length?d.leaders_harmful:[]).map(l=>
+      '<tr><td><code>'+l.wallet+'</code> <span class="pill harmful">HARMFUL</span></td><td class="num">'+l.n+'</td><td class="num neg">'+c2(l.avg_clv_cents)+'</td></tr>').join('')||'<tr><td colspan="3" class="dim" style="padding:18px">None yet</td></tr>';
+    document.getElementById('t-verify').innerHTML=d.verify_sample.map(v=>
+      '<tr><td>#'+v.position_id+'</td><td>'+(v.market_title||'').slice(0,34)+'</td><td class="num">'+v.entry_price.toFixed(3)+'</td><td class="num">'+v.close_price.toFixed(3)+'</td><td class="num '+cls(v.clv)+'">'+c2(v.clv*100)+'</td></tr>').join('');
+    document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+d.note;
+  }catch(e){document.getElementById('updated').textContent='Error: '+e;}
+}
+load(); setInterval(load,30000);
+</script>
+</body>
+</html>

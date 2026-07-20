@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-Game vs In-Play — Polymarket Copy Bot</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--panel-2:#21262d;--border:#30363d;--text:#e6edf3;--text-dim:#8b949e;--accent:#2dd4bf;--pos:#3fb950;--neg:#f85149;--amber:#d29922;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 20px 60px;}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;} h1{font-size:22px;margin:0;} .sub{color:var(--text-dim);font-size:13px;}
+  .nav{margin:8px 0 20px;} .nav a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--border);padding:5px 11px;border-radius:6px;} .nav a:hover{background:var(--panel-2);}
+  .note{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:10px 14px;color:var(--text-dim);font-size:12.5px;margin-bottom:18px;line-height:1.5;}
+  .verdict{font-size:13px;padding:12px 16px;border-radius:6px;background:var(--panel-2);margin-bottom:22px;line-height:1.55;}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;} .card.pre{border-top:3px solid var(--pos);} .card.live{border-top:3px solid var(--neg);}
+  .card h3{margin:0 0 12px;font-size:14px;}
+  .metric{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;} .metric:last-child{border-bottom:none;} .metric .k{color:var(--text-dim);} .metric .v{font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:22px;overflow:hidden;} .panel h2{font-size:14px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);} .panel h2 small{color:var(--text-dim);font-weight:400;font-size:12px;}
+  table{width:100%;border-collapse:collapse;} th,td{text-align:left;padding:9px 16px;font-size:13px;white-space:nowrap;} th{color:var(--text-dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);} td{border-bottom:1px solid var(--border);} tr:last-child td{border-bottom:none;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;} .pos{color:var(--pos);} .neg{color:var(--neg);} .dim{color:var(--text-dim);}
+  .updated{color:var(--text-dim);font-size:11px;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>🕐 Pre-Game vs In-Play</h1><span class="sub">The biggest edge discovery</span></header>
+  <div class="nav"><a href="/">← Main dashboard</a> &nbsp; <a href="/latency">Latency →</a> &nbsp; <a href="/hybrid">Hybrid →</a></div>
+
+  <div class="note">
+    <b>📖 In plain terms:</b> we discovered the bot often bets on games that have <b>already kicked off</b> (in-play), not just
+    before them (pre-game). This matters a lot: <b>pre-game bets get in before the price fully reflects the game; in-play bets
+    pay the live price for a copied opinion that's already stale.</b> A bet is <b>IN-PLAY</b> if we opened it <i>after</i> the
+    scheduled game start. This page compares the two — if pre-game wins clearly, "only bet before kickoff" becomes a top filter.
+  </div>
+
+  <div class="verdict" id="verdict">Loading…</div>
+
+  <div class="cmp">
+    <div class="card pre">
+      <h3>🟢 Pre-game (before kickoff)</h3>
+      <div class="metric"><span class="k">Bets</span><span class="v" id="pre-n">—</span></div>
+      <div class="metric"><span class="k">Win rate</span><span class="v" id="pre-wr">—</span></div>
+      <div class="metric"><span class="k">ROI</span><span class="v" id="pre-roi">—</span></div>
+      <div class="metric"><span class="k">PnL</span><span class="v" id="pre-pnl">—</span></div>
+    </div>
+    <div class="card live">
+      <h3>🔴 In-play (after kickoff)</h3>
+      <div class="metric"><span class="k">Bets</span><span class="v" id="live-n">—</span></div>
+      <div class="metric"><span class="k">Win rate</span><span class="v" id="live-wr">—</span></div>
+      <div class="metric"><span class="k">ROI</span><span class="v" id="live-roi">—</span></div>
+      <div class="metric"><span class="k">PnL</span><span class="v" id="live-pnl">—</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>By timing band <small>— how early (pre-game) or how late (in-play) we entered</small></h2>
+    <table>
+      <thead><tr><th>When we bet</th><th class="num">Bets</th><th class="num">Win rate</th><th class="num">ROI</th><th class="num">PnL</th></tr></thead>
+      <tbody id="t-lead"></tbody>
+    </table>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+<script>
+function cls(v){return v>0?'pos':(v<0?'neg':'dim');}
+function money(v){return (v>=0?'+$':'-$')+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});}
+async function load(){
+  try{
+    const d=await(await fetch('/api/timing')).json();
+    const p=d.pre_game,l=d.in_play;
+    const set=(id,v)=>document.getElementById(id).innerHTML=v;
+    set('pre-n',p.n); set('pre-wr',p.win_rate+'%'); set('pre-roi','<span class="'+cls(p.roi_pct)+'">'+p.roi_pct+'%</span>'); set('pre-pnl','<span class="'+cls(p.pnl)+'">'+money(p.pnl)+'</span>');
+    set('live-n',l.n); set('live-wr',l.win_rate+'%'); set('live-roi','<span class="'+cls(l.roi_pct)+'">'+l.roi_pct+'%</span>'); set('live-pnl','<span class="'+cls(l.pnl)+'">'+money(l.pnl)+'</span>');
+    const mult=l.roi_pct?(p.roi_pct/l.roi_pct):0;
+    document.getElementById('verdict').innerHTML=
+      '<b>'+d.pct_in_play+'% of bets are IN-PLAY</b> ('+l.n+' of '+d.resolved_with_timing+' timed). '+
+      'Pre-game ROI <b class="'+cls(p.roi_pct)+'">'+p.roi_pct+'%</b> vs in-play <b class="'+cls(l.roi_pct)+'">'+l.roi_pct+'%</b> — '+
+      (p.roi_pct>l.roi_pct*1.3? 'pre-game is <b>'+mult.toFixed(1)+'× more profitable per dollar</b>. A "bet only before kickoff" filter would concentrate on the real edge and cut the weak in-play half.' :
+       'the gap is small — no strong case for a pre-game filter yet.');
+    document.getElementById('t-lead').innerHTML=d.by_lead.map(b=>
+      '<tr><td>'+b.band+'</td><td class="num">'+b.n+'</td><td class="num">'+(b.n?b.win_rate+'%':'—')+'</td><td class="num '+cls(b.roi_pct)+'">'+(b.n?b.roi_pct+'%':'—')+'</td><td class="num '+cls(b.pnl)+'">'+(b.n?money(b.pnl):'—')+'</td></tr>').join('');
+    document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString()+' · '+d.resolved_with_timing+' of '+d.resolved_total+' trades have game-start data · '+d.note;
+  }catch(e){document.getElementById('updated').textContent='Error: '+e;}
+}
+load(); setInterval(load,30000);
+</script>
+</body>
+</html>

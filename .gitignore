@@ -1,0 +1,24 @@
+# Secrets
+.env
+*.env
+secrets.py
+
+# Data / DB
+data/
+*.db
+*.db-shm
+*.db-wal
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+.claude/

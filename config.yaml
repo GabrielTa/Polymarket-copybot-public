@@ -1,0 +1,105 @@
+# ============================================================
+# POLYMARKET COPY BOT — STRATEGY CONFIGURATION
+# ============================================================
+# All tunable parameters in one place. Edit this file, restart worker.
+# Strategy version is tracked on every position for A/B comparison.
+
+strategy_version: "v3.2"   # bumped on every meaningful change
+
+# ---- Conviction filter ----
+conviction:
+  min_leaders: 4            # minimum leaders agreeing on same (market, side)
+  window_hours: 6           # lookback window for counting conviction
+  game_level: false         # OFF: naive cross-market grouping created false consensus (generic Yes/No outcomes lump unrelated bets on the same teams). Kept strict per-market. See notes.
+  solo_elite_enabled: false # allow top-ranked leaders to bet alone
+  time_decay_lambda: 0.3    # exponential decay rate for conviction age; 0=no decay
+
+# ---- Leader quality weighting ----
+# Instead of counting leaders equally (4 leaders = ×4), weight by their
+# historical win rate. A leader with 70% win rate counts as 1.4 toward
+# conviction. A leader with 30% win rate counts as 0.6.
+leader_weighting:
+  enabled: true
+  min_trades_for_weight: 5  # need at least N closed trades to calculate weight
+  default_weight: 1.0       # weight for leaders with insufficient history
+  # weighted_conviction = sum(leader_weights) must exceed this threshold
+  weighted_min: 4.0         # legacy plain quality score (used when v2 disabled)
+  weighted_min_v2: 2.8      # quality × time_decay × size_weight threshold
+
+# ---- Entry price limits ----
+entry_price:
+  min: 0.60                 # v2.9: raised 0.40→0.60. All-time data: 0.50-0.60 band lost -$1762 (128 trades), 0.40-0.50 fragile (+$568 but -$556 last 5d). 0.60+ bands consistently +$2058. Removing <0.60 swings all-time PnL +$1195 (2.8x lifetime).
+  max: 0.80                 # don't buy above (poor risk/reward)
+
+# ---- Position sizing ----
+sizing:
+  starting_bankroll: 10000.0
+  base_risk_frac: 0.005     # 0.5% of equity as base unit (data collection — revert to 0.01 for live)
+  max_per_trade_frac: 0.05  # no single trade > 5% of equity
+  max_total_exposure: 0.95  # stop opening above 95% exposed (data collection — revert to 0.70 for live)
+  min_trade_usd: 1.0
+  # Flat sizing regardless of conviction count (data showed ×5 was worse than ×4)
+  conviction_multiplier: 2.0
+
+# ---- Resolution window ----
+resolution:
+  max_hours: 48             # only bet on markets resolving within N hours (was 168 — long-dated markets have too much intra-period volatility)
+  min_hours: 0              # 0 = no minimum (don't skip same-day markets)
+
+# ---- Category filter ----
+categories:
+  blocked: ["unknown", "politics", "other"]  # block these categories (empty = allow all)
+
+# ---- Outcome type filter ----
+# O/U Totals (Over/Under) are structurally unprofitable: 106 trades all-time, 55% WR but -$220 net.
+# Leaders betting game totals are essentially guessing. Block them.
+outcomes:
+  blocked: ["Over", "Under"]   # block these outcome labels regardless of market
+  # Spreads/handicaps ("win by N.5") are structurally unprofitable: -$2380 all-time
+  # (75% of all profit eaten). Our edge is "who wins", not "by how much" — block them.
+  block_spreads: true
+  # Exact-score markets ("Exact Score: A 2-1 B?") — predicting the precise scoreline
+  # has nothing to do with "who wins". -$419 all-time (27 trades), -$293 in last 72h.
+  block_exact_score: true
+  # Halftime markets ("X leading at halftime?", "Draw at halftime?") — leading at the
+  # 45' mark is not "who wins". Only +$30 all-time (breakeven) but fragile big-loss/
+  # small-win shape. Precautionary block to keep the strategy pure "who wins".
+  block_halftime: true
+
+# ---- Leader exclusion ----
+leader_exclusion:
+  blocked: []               # manual wallet blacklist (add full wallet addresses)
+  auto_exclude:
+    enabled: true
+    min_trades: 15          # need at least N closed trades to evaluate
+    rolling_window: 10      # only look at last N trades (0 = all-time)
+    max_win_rate: 0.40      # auto-exclude if win rate falls below this
+    max_roi_pct: -25.0      # auto-exclude if ROI falls below this %
+
+# ---- Adverse price exit ----
+adverse_exit:
+  enabled: true
+  price_drop_threshold: 0.60  # exit if current_price < entry_price × this
+  min_age_hours: 1.0           # don't trigger in first 60 min (live sports need time to breathe)
+  leader_confirmation: true    # suppress exit if any conviction leader is still buying — data shows 90% of exits happened while leaders were re-buying
+
+# ---- Per-event concentration ----
+concentration:
+  max_positions_per_event: 1  # was 2 — block if already in same event (prevents betting both sides)
+  max_positions_per_game: 1   # cap across all markets for the same real-world game (slug-based)
+  block_opposing_sides: true  # NEW — if we're long one outcome, block the opposing outcome
+
+# ---- Change 5: streak block ----
+# Skip a leader's signal if their last N copied trades were all losses.
+# Resets automatically once they win one.
+streak_block:
+  enabled: true
+  min_consecutive_losses: 3    # block after 3 straight losses
+
+# ---- Duplicate signal cooldown ----
+duplicate_cooldown_hours: 6   # skip re-entering same market+outcome+side within N hours of closing
+
+# ---- Liquidity gate ----
+liquidity:
+  min_usd: 5000
+  max_slippage_bps: 300
