@@ -566,7 +566,7 @@ def shadow():
                               signal_strength, skip_reason, status, pnl_usd, close_price,
                               opened_ts, closed_ts
                          FROM shadow_positions
-                     ORDER BY (status='open') DESC, COALESCE(closed_ts, opened_ts) DESC
+                     ORDER BY COALESCE(closed_ts, opened_ts) DESC
                         LIMIT 150"""
                 ).fetchall()
             except Exception:
