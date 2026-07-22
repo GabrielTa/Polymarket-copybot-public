@@ -87,6 +87,10 @@ def _max_drawdown(equity_series: list[float]) -> float:
 
 @app.get("/api/sizing_sim")
 def sizing_sim():
+    return _cached("sizing_sim", CACHE_TTL, _sizing_sim_query)
+
+
+def _sizing_sim_query():
     """Compare the real flat-% book vs a conviction-weighted variant, by re-weighting
     resolved positions. ROI (PnL per $ risked) is the fair comparison since the two
     deploy different capital. No real bets — pure analytics."""
@@ -506,6 +510,10 @@ def _analytics_query():
 
 @app.get("/api/shadow")
 def shadow():
+    return _cached("shadow", CACHE_TTL, _shadow_query)
+
+
+def _shadow_query():
     """Shadow book — hypothetical win rate / PnL of bets we SKIP, sliced by skip
     reason and category. Validates every filter decision forward on new data."""
     def _agg(group_col: str):
@@ -610,6 +618,10 @@ def shadow():
 
 @app.get("/api/kelly_sim")
 def kelly_sim():
+    return _cached("kelly_sim", CACHE_TTL, _kelly_sim_query)
+
+
+def _kelly_sim_query():
     """Walk-forward simulation of the friend's price-aware fractional-Kelly sizer
     (copybot_sizing_strategy_v2.9) on real resolved positions. For each bet, the stake
     is computed from ONLY the win-rate data that had resolved before that bet opened
@@ -722,6 +734,10 @@ def kelly_sim():
 
 @app.get("/api/merged_sim")
 def merged_sim():
+    return _cached("merged_sim", CACHE_TTL, _merged_sim_query)
+
+
+def _merged_sim_query():
     """The merge: your friend's Kelly sizing engine, but q_lower stratified by
     CONVICTION tier (str<=4 / str5 / str6+) instead of price bucket — because our
     edge is conviction-conditional, not price-cheapness. Walk-forward, no lookahead.
@@ -838,6 +854,11 @@ def hybrid_dashboard():
 
 @app.get("/api/hybrid_sim")
 def hybrid_sim(days: int = 30, dd_half: float = 0.25, dd_pause: float = 0.35):
+    return _cached(f"hybrid:{days}:{dd_half}:{dd_pause}", CACHE_TTL,
+                   lambda: _hybrid_sim_query(days, dd_half, dd_pause))
+
+
+def _hybrid_sim_query(days: int = 30, dd_half: float = 0.25, dd_pause: float = 0.35):
     """The hybrid: keep what's proven (conviction-weighted sizing) + add the friend's
     RISK controls (circuit breakers, exposure caps), drop the Kelly EV floor. Event-driven
     walk-forward with a compounding $1000 bankroll so drawdown-triggered breakers are real.
@@ -942,6 +963,10 @@ def timing_dashboard():
 
 @app.get("/api/timing")
 def timing():
+    return _cached("timing", CACHE_TTL, _timing_query)
+
+
+def _timing_query():
     """Pre-game vs in-play performance. A bet is IN-PLAY if we opened it after the
     scheduled game_start_ts. Discovered that ~2/3 of bets are in-play and far weaker."""
     from collections import defaultdict
@@ -991,6 +1016,10 @@ def clv_dashboard():
 
 @app.get("/api/clv")
 def clv():
+    return _cached("clv", CACHE_TTL, _clv_query)
+
+
+def _clv_query():
     """Closing Line Value — did the price move toward us after entry (skill) or did
     we buy the top (exit liquidity)? Reads clv_scores (built by clv_backfill.py).
     'extreme' closes (market resolved before our date marker) are excluded as unreliable."""
@@ -1077,6 +1106,10 @@ def clv():
 
 @app.get("/api/latency_decay")
 def latency_decay():
+    return _cached("latency_decay", CACHE_TTL, _latency_decay_query)
+
+
+def _latency_decay_query():
     """Is the copy edge perishable? Joins each resolved copied bet's OUTCOME to the
     latency (seconds between leader's trade and our observation) and slippage (our fill
     vs the leader's price) we already store. Buckets PnL/win-rate by both to find the
@@ -1197,6 +1230,10 @@ async def live_positions():
 
 @app.get("/api/buckets")
 def buckets():
+    return _cached("buckets", CACHE_TTL, _buckets_query)
+
+
+def _buckets_query():
     """(liquidity, latency) -> mean slippage in bps and count."""
     with db() as c:
         rows = c.execute(
@@ -1238,8 +1275,14 @@ async def stream(request: Request):
 
 @app.get("/api/stats")
 def stats():
+    return _cached("stats", 15, _stats_query)
+
+
+def _stats_query():
     """Top-line KPIs for the header."""
     with db() as c:
+        # Partial index makes the copy-count instant on the 1M-row signals table
+        c.execute("CREATE INDEX IF NOT EXISTS idx_signals_copy ON signals(filter_status) WHERE filter_status='copy'")
         nlead = c.execute("SELECT COUNT(*) FROM leaders WHERE excluded_reason IS NULL").fetchone()[0]
         ntot  = c.execute("SELECT COUNT(*) FROM leaders").fetchone()[0]
         nsig  = c.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
