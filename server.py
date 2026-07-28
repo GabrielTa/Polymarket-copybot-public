@@ -60,18 +60,6 @@ def index():
     return FileResponse(BASE / "web" / "index.html")
 
 
-@app.get("/debug/sentry")
-def debug_sentry():
-    """Trigger a test error so you can confirm Sentry is capturing events.
-
-    Visit /debug/sentry once after setting SENTRY_DSN — the ZeroDivisionError
-    should appear in your Sentry Issues feed within seconds. Safe to leave in;
-    it only ever raises on this one route.
-    """
-    _ = 1 / 0
-    return {"ok": True}
-
-
 @app.get("/shadow")
 def shadow_dashboard():
     return FileResponse(BASE / "web" / "shadow.html")
