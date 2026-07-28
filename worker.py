@@ -94,7 +94,8 @@ async def resolver_loop():
     await asyncio.sleep(60)
     while True:
         try:
-            n = await asyncio.to_thread(_resolver_pass)
+            with bot_metrics.cron("resolver", 15):
+                n = await asyncio.to_thread(_resolver_pass)
             if n:
                 log.info("resolver: closed %d position(s)", n)
         except Exception as e:
@@ -121,7 +122,8 @@ async def exit_monitor_loop():
     await asyncio.sleep(120)
     while True:
         try:
-            n = await asyncio.to_thread(_exit_monitor_pass)
+            with bot_metrics.cron("exit-monitor", 5):
+                n = await asyncio.to_thread(_exit_monitor_pass)
             if n:
                 log.info("exit monitor: exited %d position(s)", n)
         except Exception as e:
@@ -134,7 +136,8 @@ async def leaderboard_refresh_loop():
     await asyncio.sleep(300)
     while True:
         try:
-            summary = await asyncio.to_thread(refresh_once)
+            with bot_metrics.cron("leaderboard-refresh", 60):
+                summary = await asyncio.to_thread(refresh_once)
             if summary["new_wallets"] > 0:
                 log.info("leaderboard: %d new wallets found, re-ranking...", summary["new_wallets"])
                 await asyncio.to_thread(rank_seeds)
@@ -227,7 +230,8 @@ async def slow_loop():
         await asyncio.sleep(RANKER_INTERVAL)
         log.info("scheduled ranker refresh")
         try:
-            await asyncio.to_thread(rank_seeds)
+            with bot_metrics.cron("ranker", 360):
+                await asyncio.to_thread(rank_seeds)
         except Exception as e:
             log.exception("ranker refresh failed: %s", e)
 

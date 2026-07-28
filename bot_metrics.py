@@ -29,6 +29,48 @@ except Exception:
 
 
 @contextmanager
+def cron(slug: str, interval_minutes: int):
+    """Report a scheduled job to Sentry Crons as a check-in.
+
+    Emits in_progress on entry and ok/error on exit, and auto-creates the monitor
+    in Sentry with the given interval schedule. No-op if the SDK/crons API is
+    unavailable. Alerts you if a job stops running or overruns.
+    """
+    if not _HAVE_SDK:
+        yield
+        return
+    try:
+        from sentry_sdk.crons import capture_checkin
+    except Exception:
+        yield
+        return
+    config = {
+        "schedule": {"type": "interval", "value": interval_minutes, "unit": "minute"},
+        "checkin_margin": 5,
+        "max_runtime": 30,
+        "timezone": "UTC",
+    }
+    try:
+        cid = capture_checkin(monitor_slug=slug, status="in_progress", monitor_config=config)
+    except Exception:
+        yield
+        return
+    try:
+        yield
+    except Exception:
+        try:
+            capture_checkin(monitor_slug=slug, check_in_id=cid, status="error", monitor_config=config)
+        except Exception:
+            pass
+        raise
+    else:
+        try:
+            capture_checkin(monitor_slug=slug, check_in_id=cid, status="ok", monitor_config=config)
+        except Exception:
+            pass
+
+
+@contextmanager
 def trace(name: str, op: str = "task"):
     """Open a Sentry transaction so metrics emitted inside are trace-connected.
 

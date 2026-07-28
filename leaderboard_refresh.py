@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -20,6 +21,47 @@ log = logging.getLogger(__name__)
 
 BASE = Path(__file__).parent
 SEEDS_PATH = BASE / "data" / "seeds.json"
+SEEDS_BAK = SEEDS_PATH.parent / (SEEDS_PATH.name + ".bak")
+
+
+def _load_seeds() -> dict:
+    """Load seeds.json, tolerating corruption.
+
+    A crash mid-write (historically an OOM kill during the old non-atomic write)
+    can truncate the file. On a parse error, fall back to the last good backup,
+    else start fresh — the leaderboard re-populates on subsequent passes anyway.
+    """
+    if not SEEDS_PATH.exists():
+        return {}
+    try:
+        return json.loads(SEEDS_PATH.read_text())
+    except (json.JSONDecodeError, ValueError) as e:
+        log.error("seeds.json corrupted (%s) — attempting backup recovery", e)
+        if SEEDS_BAK.exists():
+            try:
+                seeds = json.loads(SEEDS_BAK.read_text())
+                log.warning("recovered %d seeds from %s", len(seeds), SEEDS_BAK.name)
+                return seeds
+            except Exception as be:
+                log.error("backup also unreadable (%s) — starting fresh", be)
+        return {}
+
+
+def _atomic_write_seeds(obj: dict) -> None:
+    """Write seeds.json atomically: temp file + fsync + os.replace, keeping a
+    .bak of the previous good copy. Guarantees the file is never truncated even
+    if the process is killed mid-write."""
+    tmp = SEEDS_PATH.parent / (SEEDS_PATH.name + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    if SEEDS_PATH.exists():
+        try:
+            os.replace(SEEDS_PATH, SEEDS_BAK)   # snapshot last good copy
+        except OSError:
+            pass
+    os.replace(tmp, SEEDS_PATH)                 # atomic swap
 LEADERBOARD_URL = "https://data-api.polymarket.com/v1/leaderboard"
 
 REFRESH_INTERVAL = 3600  # 1 hour
@@ -60,11 +102,8 @@ def refresh_seeds(http: httpx.Client) -> dict:
     """Pull all leaderboards and merge new wallets into seeds.json.
     Returns summary: {new_wallets: N, updated_wallets: N, total: N}.
     """
-    # Load existing seeds
-    if SEEDS_PATH.exists():
-        seeds = json.loads(SEEDS_PATH.read_text())
-    else:
-        seeds = {}
+    # Load existing seeds (corruption-tolerant)
+    seeds = _load_seeds()
 
     new_count = 0
     updated_count = 0
@@ -131,7 +170,7 @@ def refresh_seeds(http: httpx.Client) -> dict:
         key=lambda kv: (-kv[1]["persistence"], kv[1]["best_rank"]),
     ))
 
-    SEEDS_PATH.write_text(json.dumps(ordered, indent=2))
+    _atomic_write_seeds(ordered)
 
     summary = {
         "new_wallets": new_count,
@@ -161,7 +200,7 @@ if __name__ == "__main__":
     print(f"  Total seeds:     {summary['total']}")
 
     # Show top 10 by persistence
-    seeds = json.loads(SEEDS_PATH.read_text())
+    seeds = _load_seeds()
     print(f"\nTop 10 by persistence:")
     for i, (addr, w) in enumerate(list(seeds.items())[:10], 1):
         print(f"  {i:2d}. {addr}  p={w['persistence']}  best=#{w['best_rank']}  cats={w['categories']}")
