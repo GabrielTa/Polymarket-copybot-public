@@ -40,7 +40,8 @@ def _poll_pass():
     http = httpx.Client(timeout=10.0, limits=_limits, headers={"User-Agent": "copy-bot/0.1"})
     poly = PolyClient(limits=_limits)
     try:
-        return poll_once(conn, http, poly)
+        with bot_metrics.trace("poll.cycle"):
+            return poll_once(conn, http, poly)
     finally:
         http.close()
         poly.close()
@@ -72,16 +73,17 @@ def _resolver_pass():
     conn = ensure_db()
     http = httpx.Client(headers={"User-Agent": "copy-bot/0.1"})
     try:
-        n = resolve_once(conn, http)
-        try:
-            from shadow_book import ensure_shadow_table, resolve_shadow_once
-            ensure_shadow_table(conn)
-            ns = resolve_shadow_once(conn, http)
-            if ns:
-                log.info("shadow resolver: closed %d hypothetical position(s)", ns)
-        except Exception as e:
-            log.warning("shadow resolver failed: %s", e)
-        return n
+        with bot_metrics.trace("resolver.cycle"):
+            n = resolve_once(conn, http)
+            try:
+                from shadow_book import ensure_shadow_table, resolve_shadow_once
+                ensure_shadow_table(conn)
+                ns = resolve_shadow_once(conn, http)
+                if ns:
+                    log.info("shadow resolver: closed %d hypothetical position(s)", ns)
+            except Exception as e:
+                log.warning("shadow resolver failed: %s", e)
+            return n
     finally:
         http.close()
         conn.close()
@@ -106,7 +108,8 @@ def _exit_monitor_pass():
     poly = PolyClient()
     http = httpx.Client(headers={"User-Agent": "copy-bot/0.1"})
     try:
-        return exit_check_once(conn, poly, http)
+        with bot_metrics.trace("exit_monitor.cycle"):
+            return exit_check_once(conn, poly, http)
     finally:
         poly.close()
         http.close()

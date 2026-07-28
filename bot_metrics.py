@@ -13,11 +13,40 @@ Metric taxonomy for this bot:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 try:
     from sentry_sdk import metrics as _m
     _HAVE = hasattr(_m, "count")
 except Exception:  # sentry-sdk missing or too old
     _HAVE = False
+
+try:
+    import sentry_sdk as _sentry
+    _HAVE_SDK = True
+except Exception:
+    _HAVE_SDK = False
+
+
+@contextmanager
+def trace(name: str, op: str = "task"):
+    """Open a Sentry transaction so metrics emitted inside are trace-connected.
+
+    Trace-connected metrics are only reliably ingested when emitted within a
+    sampled transaction; the worker loops have no web request to ride on, so we
+    start one explicitly. No-op if the SDK is unavailable.
+    """
+    if not _HAVE_SDK:
+        yield
+        return
+    try:
+        txn_cm = _sentry.start_transaction(op=op, name=name)
+    except Exception:
+        # Couldn't start a transaction — run the body untraced rather than break.
+        yield
+        return
+    with txn_cm:
+        yield
 
 
 def _clean(attrs: dict | None) -> dict | None:
