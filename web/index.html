@@ -7,7 +7,7 @@
   Sentry.onLoad(function() {
     Sentry.init({
       integrations: [ Sentry.replayIntegration() ],
-      replaysSessionSampleRate: 0.1,   // 10% of normal sessions
+      replaysSessionSampleRate: 1.0,   // record every session (demo)
       replaysOnErrorSampleRate: 1.0,   // 100% of sessions with an error
     });
   });
