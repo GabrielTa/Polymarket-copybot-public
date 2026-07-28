@@ -60,14 +60,29 @@ def init_sentry(component: str) -> bool:
         except Exception:
             integrations = []
 
+    # Forward Python logging to Sentry Logs, but only warning+ — the bot emits INFO
+    # constantly (every poll cycle, every position), which would flood the logs quota.
+    _DROP = {"trace", "debug", "info"}
+
+    def _before_send_log(record, _hint):
+        try:
+            if record.get("severity_text", "").lower() in _DROP:
+                return None
+        except Exception:
+            pass
+        return record
+
     sentry_sdk.init(
         dsn=dsn,
         environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
         traces_sample_rate=traces_rate,
         integrations=integrations,
+        # Capture warning/error/fatal logs as Sentry Logs (INFO/debug dropped below).
+        enable_logs=True,
+        before_send_log=_before_send_log,
         # Attach which process the event came from so worker vs dashboard errors are filterable.
         release=os.environ.get("SENTRY_RELEASE") or None,
     )
     sentry_sdk.set_tag("component", component)
-    log.info("Sentry enabled for %s (traces_sample_rate=%.2f)", component, traces_rate)
+    log.info("Sentry enabled for %s (traces_sample_rate=%.2f, logs=warning+)", component, traces_rate)
     return True
