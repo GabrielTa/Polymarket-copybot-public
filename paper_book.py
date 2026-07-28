@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import bot_metrics
 import notify
 
 log = logging.getLogger(__name__)
@@ -491,6 +492,11 @@ def open_paper_position(
     _snapshot_bankroll(conn)
     conn.commit()
 
+    bot_metrics.count("copy.position_opened",
+                      category=category or "?", entry_band=bot_metrics.entry_band(our_hypo_price),
+                      strength=str(signal_strength))
+    bot_metrics.distribution("position.entry_price", our_hypo_price, category=category or "?")
+
     log.info("paper OPEN #%d: [%s] %s %s '%s' @ %.3f $%.2f (×%d)",
              pos_id, category or "?", side, outcome, market_title[:40], our_hypo_price, size_usd, signal_strength)
     notify.alert_position_opened(
@@ -567,6 +573,11 @@ def close_paper_position(
             pnl_usd=pnl, cost_usd=cost_usd,
         )
         result = "WON" if pnl > 0 else "LOST" if pnl < 0 else "BREAK_EVEN"
+        _cat = full[3] or "?"
+        bot_metrics.count("copy.position_closed", result=result, category=_cat)
+        bot_metrics.distribution("position.pnl_usd", pnl, result=result, category=_cat)
+        if full[8]:
+            bot_metrics.distribution("position.hold_hours", (now - full[8]) / 3600.0, category=_cat)
         _log_trade("CLOSE", {
             "position_id": position_id, "result": result,
             "market": full[0], "market_title": full[1], "market_slug": full[2],
@@ -588,3 +599,8 @@ def _snapshot_bankroll(conn: sqlite3.Connection):
         "INSERT INTO paper_bankroll_history(ts, cash_usd, open_exposure_usd, equity_usd) VALUES(?,?,?,?)",
         (int(time.time()), eq["cash"], eq["exposure"], eq["equity"]),
     )
+    bot_metrics.gauge("bankroll.equity_usd", eq["equity"])
+    bot_metrics.gauge("bankroll.cash_usd", eq["cash"])
+    bot_metrics.gauge("bankroll.open_exposure_usd", eq["exposure"])
+    open_n = conn.execute("SELECT COUNT(*) FROM paper_positions WHERE status='open'").fetchone()[0]
+    bot_metrics.gauge("positions.open_count", open_n)

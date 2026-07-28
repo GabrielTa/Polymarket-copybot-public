@@ -11,6 +11,7 @@ import time
 
 import httpx
 
+import bot_metrics
 import notify
 from exit_monitor import exit_check_once, EXIT_CHECK_INTERVAL
 from leader_ranker import ensure_db, rank_seeds
@@ -50,13 +51,18 @@ async def fast_loop():
     """Wallet polling every 15s — poll runs in a thread, objects created per-thread."""
     while True:
         start = time.monotonic()
+        ok = True
         try:
             n = await asyncio.to_thread(_poll_pass)
             if n:
                 log.info("poll: %d new signal(s)", n)
+                bot_metrics.distribution("signal.new_per_cycle", n)
         except Exception as e:
+            ok = False
             log.exception("poll cycle failed: %s", e)
         elapsed = time.monotonic() - start
+        bot_metrics.count("poll.cycle", ok=str(ok))
+        bot_metrics.distribution("poll.cycle_seconds", elapsed)
         await asyncio.sleep(max(0, POLL_INTERVAL - elapsed))
 
 

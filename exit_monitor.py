@@ -23,6 +23,8 @@ import time
 
 import httpx
 
+import bot_metrics
+
 import notify
 from config import cfg
 from poly_client import PolyClient, CLOB_API
@@ -160,6 +162,8 @@ def _do_exit(conn: sqlite3.Connection, pos_id: int, shares: float, cost_usd: flo
         (now, cash, exposure, cash + exposure),
     )
     conn.commit()
+    bot_metrics.count("copy.position_exited", reason=str(reason))
+    bot_metrics.distribution("position.pnl_usd", pnl, result="EXITED")
     log.info("  pos #%d exited [%s]: close=%.3f payout=$%.2f pnl=$%+.2f",
              pos_id, reason, exit_price, payout, pnl)
 
