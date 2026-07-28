@@ -283,6 +283,11 @@ if __name__ == "__main__":
     # which flooded /var/log/syslog to 2GB+ and filled the disk (Jul 12 2026 outage).
     for _noisy in ("httpx", "httpcore", "hpack"):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+    # Error monitoring — no-op if SENTRY_DSN unset or sentry-sdk missing.
+    from sentry_setup import init_sentry
+    init_sentry("worker")
+
     log.info("starting worker (poll=%ds, resolver=%dm, exit=%dm, leaderboard=%dm, ranker=%dh)",
              POLL_INTERVAL, RESOLVER_INTERVAL // 60, EXIT_CHECK_INTERVAL // 60,
              LB_REFRESH_INTERVAL // 60, RANKER_INTERVAL // 3600)
@@ -290,3 +295,12 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("worker stopped")
+    except Exception:
+        # Ensure the fatal error reaches Sentry before the process exits.
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception()
+            sentry_sdk.flush(timeout=5)
+        except Exception:
+            pass
+        raise

@@ -27,6 +27,11 @@ from fastapi.staticfiles import StaticFiles
 BASE = Path(__file__).parent
 DB_PATH = BASE / "data" / "copybot.db"
 
+# Error monitoring — must init before the app is created so request handling is traced.
+# No-op if SENTRY_DSN unset or sentry-sdk missing.
+from sentry_setup import init_sentry
+init_sentry("dashboard")
+
 app = FastAPI(title="Polymarket Copy Bot Dashboard")
 app.mount("/static", StaticFiles(directory=BASE / "web" / "static"), name="static")
 
@@ -53,6 +58,18 @@ def db() -> sqlite3.Connection:
 @app.get("/")
 def index():
     return FileResponse(BASE / "web" / "index.html")
+
+
+@app.get("/debug/sentry")
+def debug_sentry():
+    """Trigger a test error so you can confirm Sentry is capturing events.
+
+    Visit /debug/sentry once after setting SENTRY_DSN — the ZeroDivisionError
+    should appear in your Sentry Issues feed within seconds. Safe to leave in;
+    it only ever raises on this one route.
+    """
+    _ = 1 / 0
+    return {"ok": True}
 
 
 @app.get("/shadow")
