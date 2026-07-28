@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Sentry Session Replay (frontend). Replace the loader key with your project's public DSN key. -->
+<script src="https://js-de.sentry-cdn.com/YOUR_SENTRY_LOADER_KEY.min.js" crossorigin="anonymous"></script>
+<script>
+  Sentry.onLoad(function() {
+    Sentry.init({
+      integrations: [ Sentry.replayIntegration() ],
+      replaysSessionSampleRate: 0.1,   // 10% of normal sessions
+      replaysOnErrorSampleRate: 1.0,   // 100% of sessions with an error
+    });
+  });
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sizing Experiment — Polymarket Copy Bot</title>
