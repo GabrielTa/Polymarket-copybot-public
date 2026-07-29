@@ -136,13 +136,13 @@ async def leaderboard_refresh_loop():
     await asyncio.sleep(300)
     while True:
         try:
-            with bot_metrics.cron("leaderboard-refresh", 60):
+            with bot_metrics.cron("leaderboard-refresh", 60, max_runtime=15):
                 summary = await asyncio.to_thread(refresh_once)
-            if summary["new_wallets"] > 0:
-                log.info("leaderboard: %d new wallets found, re-ranking...", summary["new_wallets"])
-                await asyncio.to_thread(rank_seeds)
-            else:
-                log.info("leaderboard: refreshed, no new wallets (total=%d)", summary["total"])
+            # New wallets are merged into seeds.json here; scoring is handled by the
+            # 6h ranker (slow_loop). We intentionally do NOT re-rank all ~4600 seeds
+            # inline — that took ~2-3h and blocked this hourly loop (missed check-ins).
+            log.info("leaderboard: refreshed, %d new wallets merged (total=%d) — scored on next ranker pass",
+                     summary["new_wallets"], summary["total"])
         except Exception as e:
             log.exception("leaderboard refresh failed: %s", e)
         await asyncio.sleep(LB_REFRESH_INTERVAL)
@@ -230,7 +230,9 @@ async def slow_loop():
         await asyncio.sleep(RANKER_INTERVAL)
         log.info("scheduled ranker refresh")
         try:
-            with bot_metrics.cron("ranker", 360):
+            # rank_seeds fetches trade history for all ~4600 seeds sequentially,
+            # which legitimately takes ~2-3h — allow up to 4h before timing out.
+            with bot_metrics.cron("ranker", 360, max_runtime=240, margin=30):
                 await asyncio.to_thread(rank_seeds)
         except Exception as e:
             log.exception("ranker refresh failed: %s", e)

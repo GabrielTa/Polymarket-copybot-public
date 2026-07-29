@@ -29,12 +29,15 @@ except Exception:
 
 
 @contextmanager
-def cron(slug: str, interval_minutes: int):
+def cron(slug: str, interval_minutes: int, max_runtime: int = 30, margin: int = 5):
     """Report a scheduled job to Sentry Crons as a check-in.
 
     Emits in_progress on entry and ok/error on exit, and auto-creates the monitor
     in Sentry with the given interval schedule. No-op if the SDK/crons API is
     unavailable. Alerts you if a job stops running or overruns.
+
+    max_runtime (minutes): mark as timed-out if the job runs longer than this.
+    margin (minutes): grace period before a missing check-in counts as missed.
     """
     if not _HAVE_SDK:
         yield
@@ -46,8 +49,8 @@ def cron(slug: str, interval_minutes: int):
         return
     config = {
         "schedule": {"type": "interval", "value": interval_minutes, "unit": "minute"},
-        "checkin_margin": 5,
-        "max_runtime": 30,
+        "checkin_margin": margin,
+        "max_runtime": max_runtime,
         "timezone": "UTC",
     }
     try:
