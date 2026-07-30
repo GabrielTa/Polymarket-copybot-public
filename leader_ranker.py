@@ -23,15 +23,25 @@ import logging
 import math
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Iterable
+
+import httpx
 
 from poly_client import PolyClient, Trade
 
 log = logging.getLogger(__name__)
 
 BASE = Path(__file__).parent
+
+# Concurrent HTTP workers for the per-wallet trade/positions/value fetches.
+# httpx.Client is thread-safe, so a single client is shared across the pool
+# (same pattern as the poll loop's POLL_WORKERS). Tuned to 12: the data-api
+# rate-limits hard above ~12 (measured: 8w=38min, 12w=30min, 20w=102min as the
+# 429 backoff serializes everything). 12 is just below that cliff.
+RANK_WORKERS = 12
 SEEDS_PATH = BASE / "data" / "seeds.json"
 DB_PATH = BASE / "data" / "copybot.db"
 
@@ -258,35 +268,58 @@ def load_seeds() -> dict[str, dict]:
     return json.loads(SEEDS_PATH.read_text())
 
 
+def _rank_one(client: PolyClient, wallet: str, seed_meta: dict) -> LeaderStats | None:
+    """Fetch + analyze a single wallet (runs in a worker thread). Returns None if
+    the trade fetch fails so one bad wallet never aborts the run. Pure w.r.t. the
+    DB — the caller does the (sequential) SQLite write."""
+    try:
+        trades = client.get_all_trades(wallet, page_size=500, max_pages=10)
+    except Exception as e:
+        # 408/timeouts on deep pagination are transient — warn (not exception,
+        # which would flood Sentry with tracebacks) and skip this wallet.
+        log.warning("fetch trades failed for %s: %s", wallet, e)
+        return None
+    try:
+        positions = client.get_positions(wallet)
+    except Exception as e:
+        log.warning("fetch positions failed for %s: %s", wallet, e)
+        positions = []
+    try:
+        value = client.get_value(wallet)  # returns None on failure
+    except Exception:
+        value = None
+    return _analyze(wallet, trades, positions, value, seed_meta)
+
+
 def rank_seeds(limit: int | None = None, dry_run: bool = False) -> list[LeaderStats]:
     seeds = load_seeds()
     wallets = list(seeds.keys())
     if limit:
         wallets = wallets[:limit]
 
-    log.info("ranking %d seed wallets", len(wallets))
+    log.info("ranking %d seed wallets (parallel, %d workers)", len(wallets), RANK_WORKERS)
     conn = ensure_db()
     results: list[LeaderStats] = []
 
-    with PolyClient() as client:
-        for i, wallet in enumerate(wallets, 1):
-            log.info("[%d/%d] %s", i, len(wallets), wallet)
+    # Shared thread-safe client with a pool sized for the worker count.
+    limits = httpx.Limits(max_connections=RANK_WORKERS * 2,
+                          max_keepalive_connections=RANK_WORKERS)
+    done = 0
+    total = len(wallets)
+    with PolyClient(limits=limits) as client, \
+         ThreadPoolExecutor(max_workers=RANK_WORKERS) as ex:
+        futs = {ex.submit(_rank_one, client, w, seeds[w]): w for w in wallets}
+        for fut in as_completed(futs):
+            done += 1
             try:
-                trades = client.get_all_trades(wallet, page_size=500, max_pages=10)
+                stats = fut.result()
             except Exception as e:
-                log.exception("fetch trades failed for %s: %s", wallet, e)
+                log.warning("rank worker failed for %s: %s", futs[fut], e)
                 continue
-            try:
-                positions = client.get_positions(wallet)
-            except Exception as e:
-                log.warning("fetch positions failed for %s: %s", wallet, e)
-                positions = []
-            value = client.get_value(wallet)  # returns None on failure
-            stats = _analyze(wallet, trades, positions, value, seeds[wallet])
+            if stats is None:
+                continue
             results.append(stats)
-            log.info("  -> %d trades, %d markets, score=%.3f%s",
-                     stats.trades_total, stats.markets_total, stats.score,
-                     f" [EXCL: {stats.excluded_reason}]" if stats.excluded_reason else "")
+            # SQLite is single-writer — do the write here, in the main thread.
             if not dry_run:
                 conn.execute(
                     """INSERT OR REPLACE INTO leaders VALUES
@@ -294,7 +327,8 @@ def rank_seeds(limit: int | None = None, dry_run: bool = False) -> list[LeaderSt
                     stats.as_row(),
                 )
                 conn.commit()
-            time.sleep(0.15)
+            if done % 200 == 0 or done == total:
+                log.info("ranked %d/%d seeds", done, total)
 
     conn.close()
     results.sort(key=lambda s: s.score, reverse=True)

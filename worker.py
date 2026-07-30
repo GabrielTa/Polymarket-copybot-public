@@ -230,9 +230,8 @@ async def slow_loop():
         await asyncio.sleep(RANKER_INTERVAL)
         log.info("scheduled ranker refresh")
         try:
-            # rank_seeds fetches trade history for all ~4600 seeds sequentially,
-            # which legitimately takes ~2-3h — allow up to 4h before timing out.
-            with bot_metrics.cron("ranker", 360, max_runtime=240, margin=30):
+            # rank_seeds now fetches all ~4600 seeds in parallel (~30min); allow 60.
+            with bot_metrics.cron("ranker", 360, max_runtime=60, margin=15):
                 await asyncio.to_thread(rank_seeds)
         except Exception as e:
             log.exception("ranker refresh failed: %s", e)
