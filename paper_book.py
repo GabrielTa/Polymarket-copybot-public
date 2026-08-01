@@ -64,6 +64,8 @@ MIN_RESOLUTION_HOURS = cfg["resolution"].get("min_hours", 0)
 DUPLICATE_COOLDOWN_HOURS = cfg.get("duplicate_cooldown_hours", 6)
 MAX_ENTRY_PRICE = cfg["entry_price"]["max"]
 MIN_ENTRY_PRICE = cfg["entry_price"]["min"]
+# v3.3: optional [lo, hi) slice inside the entry band that we refuse to bet.
+DEAD_ZONE = cfg["entry_price"].get("dead_zone") or None
 BLOCKED_CATEGORIES = set(cfg["categories"]["blocked"])
 BLOCKED_OUTCOMES   = set(o.lower() for o in cfg.get("outcomes", {}).get("blocked", []))
 BLOCK_SPREADS      = cfg.get("outcomes", {}).get("block_spreads", True)
@@ -267,6 +269,13 @@ def open_paper_position(
         return {"opened": False, "reason": reason}
     if our_hypo_price <= MIN_ENTRY_PRICE:
         reason = f"price_too_low:{our_hypo_price:.2f}(longshot)"
+        _log_trade("SKIP", {"reason": reason, "market_title": market_title, "category": category,
+                            "entry_price": our_hypo_price, "signal_strength": signal_strength})
+        return {"opened": False, "reason": reason}
+    # v3.3 dead zone: a middle slice where the payoff ratio has degraded but the
+    # realised win rate has not yet caught up, so we are structurally underwater.
+    if DEAD_ZONE and DEAD_ZONE[0] <= our_hypo_price < DEAD_ZONE[1]:
+        reason = f"blocked_dead_zone:{our_hypo_price:.2f}"
         _log_trade("SKIP", {"reason": reason, "market_title": market_title, "category": category,
                             "entry_price": our_hypo_price, "signal_strength": signal_strength})
         return {"opened": False, "reason": reason}

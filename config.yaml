@@ -4,7 +4,7 @@
 # All tunable parameters in one place. Edit this file, restart worker.
 # Strategy version is tracked on every position for A/B comparison.
 
-strategy_version: "v3.2"   # bumped on every meaningful change
+strategy_version: "v3.3"   # bumped on every meaningful change
 
 # ---- Conviction filter ----
 conviction:
@@ -30,6 +30,12 @@ leader_weighting:
 entry_price:
   min: 0.60                 # v2.9: raised 0.40→0.60. All-time data: 0.50-0.60 band lost -$1762 (128 trades), 0.40-0.50 fragile (+$568 but -$556 last 5d). 0.60+ bands consistently +$2058. Removing <0.60 swings all-time PnL +$1195 (2.8x lifetime).
   max: 0.80                 # don't buy above (poor risk/reward)
+  # v3.3: structural dead zone. Payoff ratio here is 2.11:1 (break-even 67.9%)
+  # but the realised win rate plateaus at 66.7% -> negative edge in BOTH halves
+  # of the data (-3.3pp first, -6.1pp second). Excluding it beat baseline by
+  # +$515 (+38%) out-of-sample. Skipped signals still flow to the shadow book,
+  # so the block is validated forward. Remove this line to revert.
+  dead_zone: [0.70, 0.75]
 
 # ---- Position sizing ----
 sizing:
