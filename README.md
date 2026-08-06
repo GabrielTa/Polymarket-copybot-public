@@ -125,6 +125,18 @@ that existed before it.
 
 ---
 
+## Documentation
+
+- **[CHANGELOG.md](CHANGELOG.md)** — every release, with the evidence behind it
+- **[docs/STRATEGY.md](docs/STRATEGY.md)** — strategy rationale in depth, including
+  the ideas that were tested and **rejected** (leader-performance selection,
+  raising the conviction threshold, ranker-score improvements). Those matter as
+  much as the changes that shipped — each looked plausible and cost money in
+  simulation.
+
+Strategy changes are only shipped after **out-of-sample validation**: a finding
+must hold on data it was not derived from.
+
 ## Running it
 
 ```bash
