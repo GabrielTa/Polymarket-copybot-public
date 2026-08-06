@@ -7,6 +7,69 @@ explanation, not just a favourable number.
 
 ---
 
+## v3.4 — 2026-08-06 — exit instrumentation + 24h resolution cap
+
+### 1. Exit-hold shadow tracking (instrumentation, no behaviour change)
+
+**The problem.** Adverse exits were the single largest unmeasured drag on the
+strategy:
+
+| | n | Win% | P&L |
+|---|---|---|---|
+| Resolved normally | 1,131 | 66.8% | **+$9,044** |
+| Adverse-exited | 160 | 6.9% | **−$6,387** |
+| **Net** | 1,291 | 59.3% | **+$2,657** |
+
+Exits consume **70% of gross profit**. The defence is that they truncate losses
+(−35% average vs −100% at zero), but that only holds if the exited positions were
+doomed. Nothing measured the counterfactual.
+
+**The fix.** `shadow_book.open_exit_hold_shadow()` — when an adverse exit fires,
+record what **holding to resolution** would have paid, priced at the original
+entry so the two are directly comparable. Read via `GET /api/exit_analysis`,
+which reports `exit_pnl - hold_pnl` per position and in aggregate.
+
+This changes no trading behaviour. It answers a question that was previously
+unanswerable: is that −$6,387 money saved, or money destroyed?
+
+### 2. `resolution.max_hours` 48 → 24
+
+Long holds lose consistently, in both out-of-sample halves:
+
+| Hold time | First half | Second half |
+|---|---|---|
+| <6h | +$0.94/trade | +$2.91/trade |
+| 12–24h | +$3.62/trade | +$24.20/trade |
+| 24–48h | +$11.28/trade | **−$40.82/trade** |
+| >48h | **−$40.22/trade** | **−$51.89/trade** |
+
+Capping holds at 24h gained **+$206 (first half)** and **+$894 (second half)**.
+On the directly filterable dimension (entry → market end_date), the 24–48h
+bucket runs **−$11.01/trade**. Same reasoning as v2.8's 168→48 cut.
+
+**Caveat:** the samples are thin (n=20 on the filterable dimension, n=52 across
+both halves for the hold-time counterfactual). The `too_far` shadow bucket
+validates this forward.
+
+### Also examined, and deliberately NOT changed
+
+**The Over/Under block stays.** 239 resolved shadow bets showed +$4.83/$100 at a
+72.8% win rate, which superficially argues for unblocking. Rejected because:
+
+| Period | n | P&L/$100 |
+|---|---|---|
+| First half | 119 | +$7.07 |
+| Second half | 120 | +$2.60 |
+| **2026-08 (most recent)** | 24 | **−$9.08** |
+
+The effect is **decaying monotonically** (+$7.07 → +$2.60 → −$9.08), the original
+block was based on real losses (114 trades, 50.9% WR, −$722), and unblocking a
+derivative market contradicts the thesis that has produced every win since v2.8:
+**the edge is "who wins," not "by how much."** Acting on a decaying signal is the
+trap this project exists to avoid.
+
+---
+
 ## v3.3 — 2026-08-01 — entry-price dead zone
 
 **Change:** `entry_price.dead_zone: [0.70, 0.75]` — signals priced in that slice

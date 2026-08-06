@@ -4,7 +4,7 @@
 # All tunable parameters in one place. Edit this file, restart worker.
 # Strategy version is tracked on every position for A/B comparison.
 
-strategy_version: "v3.3"   # bumped on every meaningful change
+strategy_version: "v3.4"   # bumped on every meaningful change
 
 # ---- Conviction filter ----
 conviction:
@@ -49,7 +49,11 @@ sizing:
 
 # ---- Resolution window ----
 resolution:
-  max_hours: 48             # only bet on markets resolving within N hours (was 168 — long-dated markets have too much intra-period volatility)
+  max_hours: 24             # v3.4: 48 -> 24. Long holds lose in BOTH out-of-sample halves
+                            # (>48h: -$40/trade and -$52/trade; 24-48h entry->end: -$11/trade).
+                            # Capping holds at 24h gained +$206 (first half) and +$894 (second).
+                            # Same reasoning as v2.8's 168->48 cut. Sample is thin (n=20-52),
+                            # so the `too_far` shadow bucket validates this forward.
   min_hours: 0              # 0 = no minimum (don't skip same-day markets)
 
 # ---- Category filter ----

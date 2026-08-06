@@ -513,6 +513,62 @@ def _analytics_query():
     }
 
 
+@app.get("/api/exit_analysis")
+def exit_analysis():
+    return _cached("exit_analysis", CACHE_TTL, _exit_analysis_query)
+
+
+def _exit_analysis_query():
+    """Was exiting better than holding? Compares each adverse-exited position's
+    realised P&L against the exit-hold shadow (same entry price, held to
+    resolution). Positive `delta` means exiting was the right call."""
+    with db() as c:
+        rows = c.execute(
+            """SELECT pp.id, pp.market_title, pp.entry_price, pp.close_price,
+                      pp.cost_usd, pp.pnl_usd AS exit_pnl, pp.shares,
+                      sh.skip_reason, sh.status AS shadow_status,
+                      sh.close_price AS hold_close, sh.pnl_usd AS hold_pnl_100
+                 FROM paper_positions pp
+                 JOIN shadow_positions sh ON sh.ref_position_id = pp.id
+                WHERE pp.status='exited'
+             ORDER BY pp.closed_ts DESC"""
+        ).fetchall()
+    resolved, pending = [], 0
+    for r in rows:
+        if r["shadow_status"] == "open" or r["hold_pnl_100"] is None:
+            pending += 1
+            continue
+        # Shadow is a flat $100 stake; rescale to this position's actual size.
+        scale = (r["cost_usd"] or 0) / 100.0
+        hold_pnl = (r["hold_pnl_100"] or 0) * scale
+        resolved.append({
+            "position_id": r["id"],
+            "market_title": r["market_title"],
+            "entry_price": r["entry_price"],
+            "exit_price": r["close_price"],
+            "exit_pnl": round(r["exit_pnl"] or 0, 2),
+            "hold_pnl": round(hold_pnl, 2),
+            "delta": round((r["exit_pnl"] or 0) - hold_pnl, 2),
+            "exit_was_right": (r["exit_pnl"] or 0) > hold_pnl,
+            "reason": r["skip_reason"],
+        })
+    n = len(resolved)
+    saved = sum(x["delta"] for x in resolved)
+    right = sum(1 for x in resolved if x["exit_was_right"])
+    return {
+        "resolved": n,
+        "pending": pending,
+        "exit_saved_usd": round(saved, 2),
+        "exits_correct": right,
+        "exits_correct_pct": round(100.0 * right / n, 1) if n else 0,
+        "avg_saved_per_exit": round(saved / n, 2) if n else 0,
+        "verdict": ("exits are ADDING value" if saved > 0 else
+                    "exits are DESTROYING value" if saved < 0 else "neutral") if n else "no data yet",
+        "positions": resolved[:100],
+        "note": "delta = exit_pnl - hold_pnl. Positive means exiting beat holding.",
+    }
+
+
 @app.get("/api/shadow")
 def shadow():
     return _cached("shadow", CACHE_TTL, _shadow_query)

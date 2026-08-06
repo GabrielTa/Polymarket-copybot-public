@@ -161,6 +161,25 @@ def _do_exit(conn: sqlite3.Connection, pos_id: int, shares: float, cost_usd: flo
         "INSERT INTO paper_bankroll_history(ts, cash_usd, open_exposure_usd, equity_usd) VALUES(?,?,?,?)",
         (now, cash, exposure, cash + exposure),
     )
+    # Instrumentation: record what holding this position to resolution WOULD have
+    # paid, so the exit decision itself can be measured rather than assumed.
+    try:
+        p = conn.execute(
+            """SELECT market, market_title, market_slug, category, outcome, side,
+                      entry_price, signal_strength, end_date
+                 FROM paper_positions WHERE id=?""", (pos_id,)
+        ).fetchone()
+        if p:
+            from shadow_book import ensure_shadow_table, open_exit_hold_shadow
+            ensure_shadow_table(conn)
+            open_exit_hold_shadow(
+                conn, pos_id, p[0], p[4], p[5], p[6], p[7] or 0, str(reason),
+                market_title=p[1] or "", category=p[3] or "",
+                end_date=p[8] or "", market_slug=p[2] or "",
+            )
+    except Exception as e:
+        log.warning("exit-hold shadow skipped for pos #%d: %s", pos_id, e)
+
     conn.commit()
     bot_metrics.count("copy.position_exited", reason=str(reason))
     bot_metrics.distribution("position.pnl_usd", pnl, result="EXITED")

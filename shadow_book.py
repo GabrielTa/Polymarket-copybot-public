@@ -47,6 +47,11 @@ def ensure_shadow_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_shadow_status ON shadow_positions(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_shadow_reason ON shadow_positions(skip_reason)")
+    # Links an exit-hold shadow back to the real position that was exited, so the
+    # two can be compared directly (exit P&L vs hold-to-resolution P&L).
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_positions)")}
+    if "ref_position_id" not in cols:
+        conn.execute("ALTER TABLE shadow_positions ADD COLUMN ref_position_id INTEGER DEFAULT 0")
     conn.commit()
 
 
@@ -89,6 +94,54 @@ def open_shadow_position(
          entry_price, shares, signal_strength, reason_bucket(skip_reason), end_date,
          int(time.time())),
     )
+
+
+def open_exit_hold_shadow(
+    conn: sqlite3.Connection,
+    position_id: int,
+    market: str,
+    outcome: str,
+    side: str,
+    entry_price: float,
+    signal_strength: int,
+    exit_reason: str,
+    market_title: str = "",
+    category: str = "",
+    end_date: str = "",
+    market_slug: str = "",
+) -> None:
+    """Record what HOLDING an adverse-exited position to resolution would have paid.
+
+    The exit path is otherwise unmeasured: we know what exiting cost, but not what
+    the counterfactual was. Adverse exits realise ~-35% on average; whether that is
+    money *saved* (the position was doomed) or money *destroyed* (it would have
+    recovered) is unanswerable without this. Priced at the ORIGINAL entry price so
+    the resulting P&L is directly comparable to the real position's exit P&L.
+
+    Never raises — instrumentation must not break the exit path.
+    """
+    try:
+        if not market or entry_price <= 0 or entry_price >= 1:
+            return
+        # One exit-hold shadow per real position.
+        existing = conn.execute(
+            "SELECT 1 FROM shadow_positions WHERE ref_position_id=?", (position_id,)
+        ).fetchone()
+        if existing:
+            return
+        bucket = "exit_hold_conviction" if str(exit_reason).startswith("conviction") else "exit_hold_adverse"
+        conn.execute(
+            """INSERT INTO shadow_positions
+               (signal_id, ref_position_id, market, market_title, market_slug, category,
+                outcome, side, entry_price, shares, signal_strength, skip_reason,
+                end_date, opened_ts, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open')""",
+            (0, position_id, market, market_title, market_slug, category, outcome, side,
+             entry_price, SHADOW_STAKE / entry_price, signal_strength, bucket,
+             end_date, int(time.time())),
+        )
+    except Exception as e:
+        log.warning("exit-hold shadow failed for pos #%s: %s", position_id, e)
 
 
 def resolve_shadow_once(conn: sqlite3.Connection, http) -> int:
