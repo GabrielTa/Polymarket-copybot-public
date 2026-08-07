@@ -1,0 +1,103 @@
+{
+  "name": "Polybot \u2014 Weekly Validation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "23 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Monday morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_SERVER_IP:8000/api/digest?window=7d",
+        "options": {}
+      },
+      "name": "Get Digest 7d",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst d = $json;\nconst sign = n => (n >= 0 ? '+' : '') + n;\nlet msg = `\ud83d\udccb *Polybot weekly validation* (${d.strategy_version})\\n\\n`;\nconst t = d.trading, e = d.equity;\nmsg += `*7-day*: ${t.trades} trades \u00b7 ${t.win_rate}% WR \u00b7 P&L ${sign(t.pnl)}\\n`;\nmsg += `Break-even ${t.break_even_win_rate}% \u2192 margin ${sign(t.margin_pp)}pp\\n`;\nmsg += `Equity $${e.current.toLocaleString()} (${sign(e.change_pct)}% this week)\\n\\n`;\nmsg += `*Are our blocks still right?*\\n`;\nfor (const v of (d.forward_validation || [])) {\n  const mark = v.verdict === 'block correct' ? '\u2705' : v.verdict.startsWith('BLOCK') ? '\u2757' : '\u2796';\n  msg += `${mark} ${v.filter}: ${v.resolved} shadows \u00b7 ${v.win_rate}% WR \u00b7 ${sign(v.pnl_per_100)}/$100\\n`;\n}\nif (d.exits.hold_shadow_resolved > 0) {\n  msg += `\\n*Exit decisions*: ${d.exits.hold_shadow_resolved} measured \u00b7 `;\n  msg += `${d.exits.exits_correct_pct}% correct \u00b7 net ${sign(d.exits.exit_saved_usd)} \u2192 ${d.exits.verdict}`;\n}\nreturn [{ json: { text: msg } }];\n"
+      },
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Monday morning": {
+      "main": [
+        [
+          {
+            "node": "Get Digest 7d",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Digest 7d": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

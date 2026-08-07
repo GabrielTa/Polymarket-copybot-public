@@ -513,6 +513,145 @@ def _analytics_query():
     }
 
 
+@app.get("/api/digest")
+def digest(window: str = "24h"):
+    """One-call summary for external automation (n8n, cron, alerting).
+
+    Returns equity, trading performance vs the break-even win rate implied by the
+    realised payoff ratio, exit-decision quality, filter activity, forward
+    validation of each block, and a computed `alerts` list. Automation only needs
+    to check whether `alerts` is non-empty — no client-side arithmetic.
+    """
+    hrs = {"24h": 24, "48h": 48, "72h": 72, "7d": 168, "30d": 720}.get(window, 24)
+    return _cached(f"digest:{hrs}", CACHE_TTL, lambda: _digest_query(hrs, window))
+
+
+def _digest_query(hrs: int, label: str):
+    now = int(time.time())
+    cut = now - hrs * 3600
+    out = {"generated_at": now, "window": label, "alerts": []}
+
+    with db() as c:
+        try:
+            out["strategy_version"] = c.execute(
+                "SELECT strategy_version FROM paper_positions WHERE strategy_version IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1").fetchone()[0]
+        except Exception:
+            out["strategy_version"] = "?"
+
+        # ---- equity ----
+        eq_now = c.execute(
+            "SELECT equity_usd FROM paper_bankroll_history ORDER BY ts DESC LIMIT 1").fetchone()
+        eq_then = c.execute(
+            "SELECT equity_usd FROM paper_bankroll_history WHERE ts<=? ORDER BY ts DESC LIMIT 1",
+            (cut,)).fetchone()
+        peak = c.execute("SELECT MAX(equity_usd) FROM paper_bankroll_history").fetchone()[0] or 0
+        cur = eq_now[0] if eq_now else 0
+        prev = eq_then[0] if eq_then else cur
+        out["equity"] = {
+            "current": round(cur, 2),
+            "change": round(cur - prev, 2),
+            "change_pct": round(100 * (cur - prev) / prev, 2) if prev else 0,
+            "peak": round(peak, 2),
+            "drawdown_pct": round(100 * (cur - peak) / peak, 2) if peak else 0,
+        }
+
+        # ---- trading performance vs break-even ----
+        r = c.execute(
+            """SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) pnl,
+                      SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) w,
+                      COALESCE(AVG(CASE WHEN pnl_usd>0 THEN pnl_usd END),0) aw,
+                      COALESCE(AVG(CASE WHEN pnl_usd<=0 THEN pnl_usd END),0) al
+                 FROM paper_positions
+                WHERE closed_ts>=? AND status IN ('closed','exited')""", (cut,)).fetchone()
+        n, pnl, w, aw, al = r["n"], r["pnl"], r["w"], r["aw"], r["al"]
+        wr = 100.0 * w / n if n else 0.0
+        be = 100.0 * abs(al) / (aw + abs(al)) if (aw + abs(al)) else 0.0
+        out["trading"] = {
+            "trades": n, "wins": w, "win_rate": round(wr, 1),
+            "pnl": round(pnl, 2),
+            "avg_win": round(aw, 2), "avg_loss": round(al, 2),
+            "payoff_ratio": round(abs(al) / aw, 2) if aw else None,
+            "break_even_win_rate": round(be, 1),
+            "margin_pp": round(wr - be, 1) if n else None,
+        }
+
+        # ---- open exposure ----
+        o = c.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(cost_usd),0) e FROM paper_positions WHERE status='open'"
+        ).fetchone()
+        out["open_positions"] = {"count": o["n"], "exposure_usd": round(o["e"], 2)}
+
+        # ---- exit decision quality (v3.4 instrumentation) ----
+        ex = c.execute(
+            """SELECT COUNT(*) n, COALESCE(SUM(pnl_usd),0) p FROM paper_positions
+                WHERE status='exited' AND closed_ts>=?""", (cut,)).fetchone()
+        out["exits"] = {"fired": ex["n"], "pnl": round(ex["p"], 2)}
+        try:
+            ea = _exit_analysis_query()
+            out["exits"].update({
+                "hold_shadow_resolved": ea["resolved"],
+                "exit_saved_usd": ea["exit_saved_usd"],
+                "exits_correct_pct": ea["exits_correct_pct"],
+                "verdict": ea["verdict"],
+            })
+        except Exception:
+            pass
+
+        # ---- filter activity in the window ----
+        filt = {}
+        for row in c.execute(
+            """SELECT substr(position_reason,1,instr(position_reason||':',':')-1) k, COUNT(*) n
+                 FROM signals
+                WHERE filter_status='copy' AND position_opened=0 AND observed_ts>=?
+                  AND position_reason IS NOT NULL AND position_reason!=''
+             GROUP BY k ORDER BY n DESC LIMIT 10""", (cut,)):
+            if row["k"]:
+                filt[row["k"]] = row["n"]
+        out["filters_blocked"] = filt
+
+        # ---- forward validation: are our blocks still right? ----
+        val = []
+        for row in c.execute(
+            """SELECT skip_reason k, COUNT(*) n,
+                      SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) w, AVG(pnl_usd) a
+                 FROM shadow_positions WHERE status!='open'
+             GROUP BY k HAVING n>=5 ORDER BY a ASC"""):
+            per = round(row["a"], 2)
+            val.append({
+                "filter": row["k"], "resolved": row["n"],
+                "win_rate": round(100.0 * row["w"] / row["n"], 1),
+                "pnl_per_100": per,
+                "verdict": "block correct" if per < -3 else
+                           ("BLOCK MAY BE WRONG" if per > 3 else "neutral"),
+            })
+        out["forward_validation"] = val
+
+    # ---- computed alerts (the only thing automation needs to branch on) ----
+    t = out["trading"]
+    if t["trades"] >= 10 and t["margin_pp"] is not None and t["margin_pp"] < 0:
+        out["alerts"].append({
+            "level": "warning", "code": "below_breakeven",
+            "message": f"Win rate {t['win_rate']}% is below the {t['break_even_win_rate']}% "
+                       f"break-even implied by the {t['payoff_ratio']}:1 payoff ratio "
+                       f"({t['margin_pp']}pp) over {t['trades']} trades."})
+    if out["equity"]["drawdown_pct"] <= -15:
+        out["alerts"].append({
+            "level": "critical", "code": "drawdown",
+            "message": f"Equity is {out['equity']['drawdown_pct']}% below peak "
+                       f"(${out['equity']['current']:,.0f} vs ${out['equity']['peak']:,.0f})."})
+    for v in out["forward_validation"]:
+        if v["verdict"] == "BLOCK MAY BE WRONG" and v["resolved"] >= 30:
+            out["alerts"].append({
+                "level": "info", "code": "filter_review",
+                "message": f"Filter '{v['filter']}' is blocking bets that WIN "
+                           f"(+${v['pnl_per_100']}/$100 over {v['resolved']} shadows). Review it."})
+    out["alert_count"] = len(out["alerts"])
+    out["status"] = "critical" if any(a["level"] == "critical" for a in out["alerts"]) else \
+                    ("warning" if out["alerts"] else "ok")
+    return out
+
+
 @app.get("/api/exit_analysis")
 def exit_analysis():
     return _cached("exit_analysis", CACHE_TTL, _exit_analysis_query)

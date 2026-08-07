@@ -1,0 +1,98 @@
+{
+  "name": "Polybot \u2014 Sentry Alert Enricher",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "polybot-sentry",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "name": "Sentry Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_SERVER_IP:8000/api/digest?window=24h",
+        "options": {}
+      },
+      "name": "Get Bot State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst s = $('Sentry Webhook').first().json;\nconst d = $('Get Bot State').first().json;\nconst title = s.data?.issue?.title || s.data?.event?.title || s.action || 'Sentry event';\nconst culprit = s.data?.issue?.culprit || '';\nlet msg = `\ud83d\udd14 *Sentry* \u2014 ${title}\\n`;\nif (culprit) msg += `\\`${culprit}\\`\\n`;\nmsg += `\\n*Bot state right now*\\n`;\nmsg += `Equity $${d.equity.current.toLocaleString()} (${d.equity.drawdown_pct}% off peak)\\n`;\nmsg += `${d.open_positions.count} open \u00b7 $${d.open_positions.exposure_usd} exposed\\n`;\nmsg += `24h: ${d.trading.trades} trades \u00b7 ${d.trading.win_rate}% WR \u00b7 P&L ${d.trading.pnl}\\n`;\nmsg += `Status: *${d.status}*`;\nreturn [{ json: { text: msg } }];\n"
+      },
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Sentry Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Bot State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bot State": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

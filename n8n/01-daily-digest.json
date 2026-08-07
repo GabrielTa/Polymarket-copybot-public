@@ -1,0 +1,139 @@
+{
+  "name": "Polybot \u2014 Daily Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "7 9 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://YOUR_SERVER_IP:8000/api/digest?window=24h",
+        "options": {}
+      },
+      "name": "Get Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 25,
+        "organizationSlug": "personal-zuw",
+        "projectSlug": "polyparket",
+        "additionalFields": {
+          "query": "is:unresolved"
+        }
+      },
+      "name": "Sentry Issues",
+      "type": "n8n-nodes-base.sentryIo",
+      "typeVersion": 1,
+      "position": [
+        460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst d = $('Get Digest').first().json;\nconst issues = ($('Sentry Issues').all() || []).length;\nconst t = d.trading, e = d.equity;\nconst icon = d.status === 'critical' ? '\ud83d\udea8' : d.status === 'warning' ? '\u26a0\ufe0f' : '\u2705';\nconst sign = n => (n >= 0 ? '+' : '') + n;\nlet msg = `${icon} *Polybot daily* (${d.strategy_version})\\n\\n`;\nmsg += `*Equity* $${e.current.toLocaleString()}  (${sign(e.change)} / ${sign(e.change_pct)}%)\\n`;\nmsg += `Peak $${e.peak.toLocaleString()}  \u00b7  drawdown ${e.drawdown_pct}%\\n\\n`;\nmsg += `*Trading (24h)*\\n`;\nmsg += `${t.trades} trades \u00b7 ${t.win_rate}% WR \u00b7 P&L ${sign(t.pnl)}\\n`;\nmsg += `Break-even ${t.break_even_win_rate}% \u2192 margin ${sign(t.margin_pp)}pp\\n`;\nmsg += `Payoff ${t.payoff_ratio}:1  (avg win ${sign(t.avg_win)} / avg loss ${t.avg_loss})\\n\\n`;\nmsg += `*Open* ${d.open_positions.count} positions \u00b7 $${d.open_positions.exposure_usd}\\n`;\nif (d.exits.fired > 0) {\n  msg += `*Exits* ${d.exits.fired} fired (${sign(d.exits.pnl)})`;\n  if (d.exits.hold_shadow_resolved > 0) msg += ` \u2014 ${d.exits.verdict}`;\n  msg += `\\n`;\n}\nmsg += `*Sentry* ${issues} unresolved issue(s)\\n`;\nif (d.alerts.length) {\n  msg += `\\n*Alerts*\\n` + d.alerts.map(a => `\u2022 ${a.message}`).join('\\n');\n}\nreturn [{ json: { text: msg } }];\n"
+      },
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Get Digest",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sentry Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Digest": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentry Issues": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
