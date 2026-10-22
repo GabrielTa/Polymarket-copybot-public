@@ -66,6 +66,12 @@ MAX_ENTRY_PRICE = cfg["entry_price"]["max"]
 MIN_ENTRY_PRICE = cfg["entry_price"]["min"]
 # v3.3: optional [lo, hi) slice inside the entry band that we refuse to bet.
 DEAD_ZONE = cfg["entry_price"].get("dead_zone") or None
+# v3.5: the conviction band we actually BET. 5-6 was positive in all four months
+# (+$1,220 / +$1,361); conviction 4 ran -$470 at -7.7pp edge on 56% of volume, and
+# 7+ ran -$1,496. Enforced here rather than in signal_filter so declined signals
+# still reach the shadow book and the band can be validated forward. 0 disables.
+BET_MIN_CONVICTION = cfg.get("conviction", {}).get("bet_min") or 0
+BET_MAX_CONVICTION = cfg.get("conviction", {}).get("bet_max") or 0
 BLOCKED_CATEGORIES = set(cfg["categories"]["blocked"])
 BLOCKED_OUTCOMES   = set(o.lower() for o in cfg.get("outcomes", {}).get("blocked", []))
 BLOCK_SPREADS      = cfg.get("outcomes", {}).get("block_spreads", True)
@@ -269,6 +275,18 @@ def open_paper_position(
         return {"opened": False, "reason": reason}
     if our_hypo_price <= MIN_ENTRY_PRICE:
         reason = f"price_too_low:{our_hypo_price:.2f}(longshot)"
+        _log_trade("SKIP", {"reason": reason, "market_title": market_title, "category": category,
+                            "entry_price": our_hypo_price, "signal_strength": signal_strength})
+        return {"opened": False, "reason": reason}
+    # v3.5 conviction band: bet only 5-6. Both bounds are skips (not upstream
+    # rejections) so every declined signal is shadow-scored and reversible.
+    if BET_MIN_CONVICTION and signal_strength < BET_MIN_CONVICTION:
+        reason = f"conviction_too_low:{signal_strength}<{BET_MIN_CONVICTION}"
+        _log_trade("SKIP", {"reason": reason, "market_title": market_title, "category": category,
+                            "entry_price": our_hypo_price, "signal_strength": signal_strength})
+        return {"opened": False, "reason": reason}
+    if BET_MAX_CONVICTION and signal_strength > BET_MAX_CONVICTION:
+        reason = f"conviction_too_high:{signal_strength}>{BET_MAX_CONVICTION}"
         _log_trade("SKIP", {"reason": reason, "market_title": market_title, "category": category,
                             "entry_price": our_hypo_price, "signal_strength": signal_strength})
         return {"opened": False, "reason": reason}

@@ -198,6 +198,12 @@ def exit_check_once(conn: sqlite3.Connection, poly: PolyClient, http: httpx.Clie
     if not rows:
         return 0
 
+    # v3.5: conviction exits are OFF by default. The exit-hold instrumentation
+    # (112 resolved shadows) showed holding would have won 69.6% of the time for
+    # +$3.76/$100, while the exit itself realised $0.00 — it was destroying ~$420
+    # of expected value. Adverse price exits stay on; those were correct.
+    conv_exit_enabled = cfg.get("conviction_exit", {}).get("enabled", False)
+
     adv_cfg = cfg.get("adverse_exit", {})
     adv_enabled   = adv_cfg.get("enabled", False)
     adv_threshold = adv_cfg.get("price_drop_threshold", 0.60)
@@ -215,7 +221,7 @@ def exit_check_once(conn: sqlite3.Connection, poly: PolyClient, http: httpx.Clie
         # ----------------------------------------------------------------
         # 1. Conviction exit: majority of leaders have sold → follow them
         # ----------------------------------------------------------------
-        if len(conviction_wallets) >= 2:
+        if conv_exit_enabled and len(conviction_wallets) >= 2:
             sellers = 0
             for wallet in conviction_wallets:
                 if _leader_has_sold(poly, wallet, market, opened_ts):
@@ -226,10 +232,12 @@ def exit_check_once(conn: sqlite3.Connection, poly: PolyClient, http: httpx.Clie
             if fraction_sold >= EXIT_THRESHOLD:
                 log.info("exit monitor: pos #%d — %d/%d leaders sold (%s)",
                          pos_id, sellers, len(conviction_wallets), market[:16])
-                asset_row = conn.execute(
-                    "SELECT our_hypo_price FROM signals WHERE id=?", (signal_id,)
-                ).fetchone()
-                exit_price_val = asset_row[0] if asset_row else 0.5
+                # v3.5 fix: price the exit at the LIVE market price. This used to
+                # read signals.our_hypo_price — the ENTRY price — so every
+                # conviction exit closed at fabricated break-even and booked $0.00.
+                _tok = _get_token_for_market(http, market, outcome)
+                _live = _get_current_price(http, _tok) if _tok else None
+                exit_price_val = _live if _live is not None else entry_price
                 exit_reason = f"conviction:{sellers}/{len(conviction_wallets)}_sold"
 
         # ----------------------------------------------------------------

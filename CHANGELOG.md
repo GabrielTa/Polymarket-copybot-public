@@ -11,6 +11,37 @@ rather than just a favourable number.
 
 ---
 
+## v3.5 — 2026-10-22
+
+Diagnosis: four months of flat equity ($12,101 -> $11,751) on ~1,700 trades, caused
+by **negative edge vs implied probability in every month** (-0.2, -0.6, -8.8, -5.5 pp).
+The strategy wins about as often as the price says it should. Fix is concentration.
+
+### Changed
+- **Bet only conviction 5-6** (`conviction.bet_min: 5`, `bet_max: 6`). Conviction 5
+  (+$1,220) and 6 (+$1,361) were positive in all four months; conviction 4 was 56% of
+  volume at -7.7pp edge and net -$470; 7+ was -$1,496. Keeping only 5-6 would have
+  turned +$328 into +$2,581 over 120 days. Enforced as shadow-tracked skips so the
+  band is reversible. **Reverses the August `shadow_min5` read**, which was fitted to
+  July — the one month conviction-4 worked.
+- **Conviction exits disabled** (`conviction_exit.enabled: false`). The v3.4
+  instrumentation showed holding would have won 69.6% of 112 cases for +$3.76/$100
+  while the exit booked $0.00 — ~$420 of EV discarded. Adverse price exits stay on.
+- **Crypto blocked.** 32 positions, 50.0% win rate, -$367. Never actually blocked
+  despite the notes saying to avoid it.
+
+### Fixed
+- Conviction exits priced from `signals.our_hypo_price` — the **entry** price — so
+  every one closed at fabricated break-even. Now uses the live market price.
+
+### Examined, not changed
+- Pre-game vs in-play flipped in September (post-World-Cup regime change, not a
+  stable edge).
+- The v3.3 dead zone now reads as wrong: 946 forward shadows at 74.5% WR,
+  +$3.18/$100. Revert candidate for v3.6, held back so v3.5 can be measured alone.
+
+---
+
 ## v3.4 — 2026-08-06
 
 ### Added

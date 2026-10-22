@@ -7,6 +7,79 @@ explanation, not just a favourable number.
 
 ---
 
+## v3.5 — 2026-10-22 — conviction band, conviction exits off, crypto blocked
+
+### The diagnosis this came from
+
+Four months of flat equity ($12,101 → $12,052 → $11,518 → $11,751) on ~1,700
+trades. The cause, measured as `edge = realised win% − implied probability paid`:
+
+| Month | n | Win% | Implied% | **Edge** | P&L |
+|---|---|---|---|---|---|
+| Jul | 383 | 69.2% | 69.4% | −0.2 | +$1,375 |
+| Aug | 433 | 68.1% | 68.8% | −0.6 | −$49 |
+| Sep | 424 | 59.2% | 68.0% | **−8.8** | −$534 |
+| Oct | 462 | 63.0% | 68.5% | **−5.5** | +$233 |
+
+**Negative edge every month.** The strategy wins about as often as the price says
+it should, so equity random-walks. The fix is concentration — cutting the
+negative-edge majority, not adding volume.
+
+### 1. Bet only conviction 5–6 (`bet_min: 5`, `bet_max: 6`)
+
+| Conviction | Jul | Aug | Sep | Oct | 120d | Edge |
+|---|---|---|---|---|---|---|
+| 4 (56% of volume) | +$1,333 | −$1,642 | −$693 | +$455 | **−$470** | −7.7 |
+| **5** | +$292 | +$726 | +$231 | +$7 | **+$1,220** | **+0.3** |
+| **6** | +$25 | +$91 | +$286 | +$887 | **+$1,361** | **+3.4** |
+| 7+ | −$463 | +$326 | −$367 | −$992 | **−$1,496** | −10.2 |
+
+5 and 6 are the only buckets positive in **all four months**. Keeping just them
+would have turned +$328 into +$2,581 over 120 days, on a third of the volume.
+
+**This reverses the v3.4-era conclusion.** In August the `shadow_min5` flag said
+raising the bar would destroy value — that test ran on 384 trades from Jul–Aug,
+and July was the single month conviction-4 worked. More data inverted it.
+
+Both bounds are enforced in `paper_book` as **skips**, not upstream rejections, so
+declined signals still reach the shadow book (`conviction_too_low` /
+`conviction_too_high`) and the band stays reversible on forward evidence. The
+`min_leaders` gate stays at 4 for exactly that reason.
+
+### 2. Conviction exits disabled (`conviction_exit.enabled: false`)
+
+The v3.4 exit-hold instrumentation settled it — 122 resolved shadows:
+
+| Exit type | n | Hold would've won | Hold $/100 | Exit $/100 | Verdict |
+|---|---|---|---|---|---|
+| adverse price | 10 | 20.0% | −$67.26 | −$57.69 | ✅ correct, kept |
+| **conviction** | **112** | **69.6%** | **+$3.76** | **$0.00** | ❌ **off** |
+
+Conviction exits threw away ~$420 of expected value. They also priced the exit
+from `signals.our_hypo_price` — the **entry** price — so every one closed at
+fabricated break-even and booked exactly $0.00. That bug is fixed (live market
+price now), but the behaviour stays off pending evidence it helps.
+
+Exits lost money in every month: −$74, −$179, −$263, −$260.
+
+### 3. Crypto blocked
+
+Never actually in `categories.blocked` despite the project notes saying to avoid
+it. 32 positions, **50.0% win rate, −$367** (−$11.46/trade). "Will BTC be above
+$86,000 on Oct 7" is a coin flip; leader consensus carries no information on it.
+
+### Examined, not changed
+
+- **Pre-game vs in-play flipped in September.** In-play: +$1,339 / +$459 / −$1,235
+  / −$1,211. Pre-game: +$606 / −$77 / +$1,018 / +$1,520. That tracks the World Cup
+  ending (~Jul 19) — a regime change, not a stable edge. Shadow-test before acting.
+- **The v3.3 dead zone now looks wrong.** 946 resolved shadows in the blocked
+  0.70–0.75 band: 74.5% win rate, **+$3.18/$100**. The forward data contradicts the
+  out-of-sample test it shipped on. Left in place for now so v3.5's effect can be
+  measured on its own; revert candidate for v3.6.
+
+---
+
 ## v3.4 — 2026-08-06 — exit instrumentation + 24h resolution cap
 
 ### 1. Exit-hold shadow tracking (instrumentation, no behaviour change)

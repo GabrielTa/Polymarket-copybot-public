@@ -4,11 +4,23 @@
 # All tunable parameters in one place. Edit this file, restart worker.
 # Strategy version is tracked on every position for A/B comparison.
 
-strategy_version: "v3.4"   # bumped on every meaningful change
+strategy_version: "v3.5"   # bumped on every meaningful change
 
 # ---- Conviction filter ----
 conviction:
-  min_leaders: 4            # minimum leaders agreeing on same (market, side)
+  min_leaders: 4            # conviction GATE (signal_filter). Kept at 4 so conviction-4
+                            # signals still qualify as 'copy' and flow into the shadow book
+                            # when bet_min skips them — otherwise we'd be blind to whether
+                            # raising the bar was right. Betting bounds are bet_min/bet_max.
+  bet_min: 5                # v3.5: only BET 5+. Conviction 4 was 56% of volume at -7.7pp edge
+                            # and net -$470/120d, swinging +$1333/-$1642/-$693/+$455 month
+                            # to month. Conviction 5 (+$1220) and 6 (+$1361) were positive
+                            # in ALL FOUR months. This reverses the Aug shadow_min5 read,
+                            # which was fitted to July — the one month conviction 4 worked.
+  bet_max: 6                # v3.5: don't bet 7+. Crowded trades the market has already
+                            # repriced: -$1,496/120d and unstable month to month.
+                            # Both bounds are enforced in paper_book as SKIPs, so the shadow
+                            # book scores every bet we decline and we can revert on evidence.
   window_hours: 6           # lookback window for counting conviction
   game_level: false         # OFF: naive cross-market grouping created false consensus (generic Yes/No outcomes lump unrelated bets on the same teams). Kept strict per-market. See notes.
   solo_elite_enabled: false # allow top-ranked leaders to bet alone
@@ -58,7 +70,10 @@ resolution:
 
 # ---- Category filter ----
 categories:
-  blocked: ["unknown", "politics", "other"]  # block these categories (empty = allow all)
+  # v3.5: added crypto. Never actually blocked despite the notes saying to avoid it —
+  # 32 positions, 50.0% win rate, -$367 (-$11.46/trade). "Will BTC be above $86,000" is a
+  # coin flip; leader consensus carries no information about it.
+  blocked: ["unknown", "politics", "other", "crypto"]
 
 # ---- Outcome type filter ----
 # O/U Totals (Over/Under) are structurally unprofitable: 106 trades all-time, 55% WR but -$220 net.
@@ -85,6 +100,16 @@ leader_exclusion:
     rolling_window: 10      # only look at last N trades (0 = all-time)
     max_win_rate: 0.40      # auto-exclude if win rate falls below this
     max_roi_pct: -25.0      # auto-exclude if ROI falls below this %
+
+# ---- Conviction exit (v3.5: DISABLED) ----
+# When a majority of conviction leaders sold, we used to follow them out. The v3.4
+# exit-hold instrumentation settled it: across 112 resolved shadows, HOLDING would
+# have won 69.6% of the time for +$3.76/$100, while the exit booked $0.00 — roughly
+# $420 of expected value thrown away. It also priced exits off signals.our_hypo_price
+# (the ENTRY price), so every one closed at fabricated break-even. Price bug is fixed
+# in exit_monitor.py; the behaviour stays off pending evidence it helps.
+conviction_exit:
+  enabled: false
 
 # ---- Adverse price exit ----
 adverse_exit:
